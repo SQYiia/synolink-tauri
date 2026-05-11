@@ -150,6 +150,8 @@ async function logout() {
           <span style="color:#909399; font-size:12px;">更新于 {{ lastUpdate || '—' }}</span>
           <el-button @click="refreshAll" :loading="loading">刷新</el-button>
           <el-button @click="gotoFiles">文件</el-button>
+          <el-button @click="router.push('/album')">相册</el-button>
+          <el-button @click="router.push('/videos')">视频集</el-button>
           <el-button type="danger" @click="logout">注销</el-button>
         </div>
       </div>

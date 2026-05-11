@@ -1,4 +1,9 @@
 import { fetch } from '@tauri-apps/plugin-http'
+import { invoke } from '@tauri-apps/api/core'
+
+/** Windows 下自定义 scheme 走 http://<scheme>.localhost，其他平台是 <scheme>://localhost */
+const IS_WINDOWS = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent)
+const DSM_SCHEME_BASE = IS_WINDOWS ? 'http://dsm.localhost' : 'dsm://localhost'
 
 /** DSM 统一响应结构（doc 1.4） */
 export interface DsmResponse<T = any> {
@@ -6,6 +11,14 @@ export interface DsmResponse<T = any> {
   data?: T
   error?: { code: number; errors?: any }
 }
+
+/** 会话失效（code=119）时由外部提供的自动恢复函数：返回 true 表示重登成功。 */
+let sessionRecoverer: (() => Promise<boolean>) | null = null
+export function setSessionRecoverer(fn: (() => Promise<boolean>) | null) {
+  sessionRecoverer = fn
+}
+/** 防止并发重登；多个并发请求共享同一次重登 Promise。 */
+let reloginInflight: Promise<boolean> | null = null
 
 /** SYNO.API.Info 返回的单个 API 条目 */
 export interface ApiInfo {
@@ -60,6 +73,7 @@ export class DsmClient {
       form?: Record<string, any>
       headers?: Record<string, string>
     } = {},
+    _retried = false,
   ): Promise<T> {
     const method = opts.method ?? 'GET'
     // 注入 _sid（DSM session ID）
@@ -94,11 +108,25 @@ export class DsmClient {
       },
     } as any)
     const text = await res.text()
+    let parsed: any
     try {
-      return JSON.parse(text) as T
+      parsed = JSON.parse(text)
     } catch {
       return text as any
     }
+    // 会话失效（code=119 / 105 / 106 / 107）自动重登并重放一次
+    const code = parsed?.error?.code
+    const SESSION_LOST = code === 119 || code === 105 || code === 106 || code === 107
+    if (!_retried && parsed?.success === false && SESSION_LOST && sessionRecoverer) {
+      // 登出登入接口自身不走恢复，避免死循环
+      const isAuthCall = (opts.form?.api === 'SYNO.API.Auth') || (opts.query?.api === 'SYNO.API.Auth') || path.endsWith('/auth.cgi')
+      if (!isAuthCall) {
+        if (!reloginInflight) reloginInflight = sessionRecoverer().finally(() => { reloginInflight = null })
+        const ok = await reloginInflight
+        if (ok) return this.request<T>(path, opts, true)
+      }
+    }
+    return parsed as T
   }
 
   /** SYNO.API.Info (doc 2.1) */
@@ -164,13 +192,23 @@ export class DsmClient {
     if (res.success && res.data) {
       this.sid = res.data.sid ?? ''
       this.synoToken = res.data.synotoken ?? ''
+      // 同步会话给 Rust 端（用于 dsm:// 代理流式播放）
+      try {
+        await invoke('set_session', {
+          baseUrl: this.baseUrl,
+          sid: this.sid,
+          synoToken: this.synoToken,
+        })
+      } catch {}
     }
     return res
   }
 
   /** 登出（doc 3.2） */
   async logout() {
-    return this.entry('SYNO.API.Auth', 'logout', { params: { session: 'webui' } })
+    const res = await this.entry('SYNO.API.Auth', 'logout', { params: { session: 'webui' } })
+    try { await invoke('clear_session') } catch {}
+    return res
   }
 
   /** 共享文件夹列表（doc 4.4 list_share） */
@@ -185,15 +223,21 @@ export class DsmClient {
   }
 
   /** 文件列表（doc 4.4 list） */
-  async listFiles(folderPath: string, opts: { offset?: number; limit?: number; additional?: string } = {}) {
+  async listFiles(folderPath: string, opts: { offset?: number; limit?: number; additional?: string; filetype?: 'all' | 'file' | 'dir' } = {}) {
     return this.entry('SYNO.FileStation.List', 'list', {
       params: {
         folder_path: folderPath,
         offset: opts.offset ?? 0,
         limit: opts.limit ?? 0,
         additional: opts.additional ?? '',
+        filetype: opts.filetype ?? 'all',
       },
     })
+  }
+
+  /** 只列目录（给目录选择器用） */
+  async listFolders(folderPath: string) {
+    return this.listFiles(folderPath, { filetype: 'dir', limit: 0 })
   }
 
   /** 新建文件夹（doc 4.6 create） */
@@ -221,11 +265,24 @@ export class DsmClient {
     })
   }
 
-  /** 搜索：启动任务（doc 4.15 start） */
-  async searchStart(folderPath: string, pattern: string, recursive = true) {
+  /** 搜索：启动任务（doc 4.15 start）
+   *  注意：pattern 留空表示搜索所有文件；传 `*` 会被 DSM 当作不合法正则立即返回空。 */
+  async searchStart(
+    folderPath: string,
+    pattern = '',
+    recursive = true,
+    extra: { extension?: string; filetype?: 'file' | 'dir' | 'all' } = {},
+  ) {
+    const params: Record<string, any> = {
+      folder_path: folderPath,
+      pattern,
+      recursive: recursive ? 'true' : 'false',
+    }
+    if (extra.extension) params.extension = extra.extension
+    if (extra.filetype) params.filetype = extra.filetype
     return this.entry<{ taskid: string }>('SYNO.FileStation.Search', 'start', {
       post: true,
-      params: { folder_path: folderPath, pattern, recursive: recursive ? 'true' : 'false' },
+      params,
     })
   }
 
@@ -274,6 +331,19 @@ export class DsmClient {
       _sid: this.sid,
     })
     return `${this.baseUrl}/webapi/${cgi}?${params.toString()}`
+  }
+
+  /** 拉取缩略图字节（绕过自签名证书） */
+  async thumbBytes(path: string, size: 'small' | 'medium' | 'large' | 'original' = 'small'): Promise<ArrayBuffer> {
+    const url = this.thumbUrl(path, size)
+    const headers: Record<string, string> = {}
+    if (this.synoToken) headers['X-SYNO-TOKEN'] = this.synoToken
+    const res = await fetch(url, {
+      method: 'GET',
+      headers,
+      danger: { acceptInvalidCerts: true, acceptInvalidHostnames: true },
+    } as any)
+    return await res.arrayBuffer()
   }
 
   /** 文件上传 multipart（doc 4.9 upload） */
@@ -336,6 +406,12 @@ export class DsmClient {
     return this.entry('SYNO.Core.Storage.Volume', 'list', {
       params: { limit: -1, offset: 0, location: 'internal', option: 'none' },
     })
+  }
+
+  /** 构造 dsm:// 代理 URL（由 Rust 端转发并绕过自签名证书） */
+  mediaUrl(kind: 'stream' | 'thumb', path: string, extra: Record<string, string> = {}) {
+    const params = new URLSearchParams({ path, ...extra })
+    return `${DSM_SCHEME_BASE}/${kind}?${params.toString()}`
   }
 }
 

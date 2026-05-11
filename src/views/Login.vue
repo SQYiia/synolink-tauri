@@ -66,7 +66,7 @@ async function submit() {
         await app.setCurrent(serverId, acc.id)
       }
       ElMessage.success('登录成功')
-      router.replace('/home')
+      router.replace('/app/files')
     } else {
       const code = res.error?.code
       if (code === 400) ElMessage.error('账号或密码错误')

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { openUrl } from '@tauri-apps/plugin-opener'
@@ -11,6 +11,10 @@ const path = ref<string>('')
 const items = ref<any[]>([])
 const crumbs = ref<string[]>([])
 const uploadInput = ref<HTMLInputElement | null>(null)
+
+// 缩略图：path -> blob URL
+const thumbs = ref<Record<string, string>>({})
+let thumbGen = 0 // 防止旧请求覆盖新目录
 
 // 搜索
 const searchPattern = ref('')
@@ -231,6 +235,12 @@ async function preview(row: any) {
     ElMessage.info('该类型暂不支持预览，可改为下载')
     return
   }
+  // 视频/音频优先用 dsm:// 流式播放，避免整文件载入内存
+  if (previewType.value === 'video' || previewType.value === 'audio') {
+    previewSrc.value = dsm.mediaUrl('stream', row.path)
+    previewOpen.value = true
+    return
+  }
   previewOpen.value = true
   previewLoading.value = true
   try {
@@ -239,13 +249,8 @@ async function preview(row: any) {
       const decoder = new TextDecoder('utf-8', { fatal: false })
       previewText.value = decoder.decode(buf)
     } else {
-      const mime =
-        previewType.value === 'image'
-          ? 'image/*'
-          : previewType.value === 'video'
-            ? 'video/mp4'
-            : 'audio/mpeg'
-      const blob = new Blob([buf], { type: mime })
+      // image
+      const blob = new Blob([buf], { type: 'image/*' })
       previewSrc.value = URL.createObjectURL(blob)
     }
   } catch (e: any) {
@@ -257,10 +262,10 @@ async function preview(row: any) {
 }
 
 watch(previewOpen, (v) => {
-  if (!v && previewSrc.value) {
+  if (!v && previewSrc.value && previewSrc.value.startsWith('blob:')) {
     URL.revokeObjectURL(previewSrc.value)
-    previewSrc.value = ''
   }
+  if (!v) previewSrc.value = ''
 })
 
 function formatSize(n?: number) {
@@ -279,16 +284,59 @@ function isRowDir(row: any) {
   return row.isdir ?? !row.additional?.size
 }
 
-function back() {
-  router.back()
+function isThumbable(row: any): boolean {
+  if (isRowDir(row)) return false
+  const t = typeOf(row.name ?? '')
+  return t === 'image' || t === 'video'
 }
+
+function revokeThumbs() {
+  for (const url of Object.values(thumbs.value)) {
+    try { URL.revokeObjectURL(url) } catch {}
+  }
+  thumbs.value = {}
+}
+
+async function loadThumbs(rows: any[], gen: number) {
+  const targets = rows
+    .filter(isThumbable)
+    .map((r) => r.path as string)
+    .filter((p) => p && !thumbs.value[p])
+  const concurrency = 4
+  let idx = 0
+  const workers = Array.from({ length: Math.min(concurrency, targets.length) }, async () => {
+    while (idx < targets.length) {
+      const p = targets[idx++]
+      if (gen !== thumbGen) return
+      try {
+        const buf = await dsm.thumbBytes(p, 'small')
+        if (gen !== thumbGen) return
+        // 大小太小通常是 DSM 返回的 JSON 错误，跳过
+        if (!buf || buf.byteLength < 64) continue
+        const blob = new Blob([buf], { type: 'image/jpeg' })
+        thumbs.value[p] = URL.createObjectURL(blob)
+      } catch {}
+    }
+  })
+  await Promise.all(workers)
+}
+
+watch(items, (rows) => {
+  revokeThumbs()
+  thumbGen++
+  if (rows && rows.length) void loadThumbs(rows, thumbGen)
+})
+
+onUnmounted(() => {
+  revokeThumbs()
+})
 </script>
 
 <template>
   <el-container class="page">
     <el-header>
       <div class="header">
-        <el-button @click="back">返回</el-button>
+        <h2 class="page-title">文件</h2>
         <el-breadcrumb separator="/" style="flex: 1; margin: 0 12px;">
           <el-breadcrumb-item><a @click="loadShares">共享文件夹</a></el-breadcrumb-item>
           <el-breadcrumb-item v-for="(c, i) in crumbs" :key="c"><a @click="crumbJump(i)">{{ c }}</a></el-breadcrumb-item>
@@ -309,10 +357,17 @@ function back() {
     </el-header>
     <el-main v-loading="loading">
       <el-table :data="items" stripe @row-dblclick="openFolder" style="width: 100%">
-        <el-table-column width="40">
+        <el-table-column width="56">
           <template #default="{ row }">
-            <el-icon v-if="isRowDir(row)"><Folder /></el-icon>
-            <el-icon v-else><Document /></el-icon>
+            <el-icon v-if="isRowDir(row)" :size="28"><Folder /></el-icon>
+            <img
+              v-else-if="isThumbable(row) && thumbs[row.path]"
+              :src="thumbs[row.path]"
+              class="thumb"
+              @click="preview(row)"
+            />
+            <el-icon v-else-if="isThumbable(row)" :size="28" class="thumb-ph"><Picture /></el-icon>
+            <el-icon v-else :size="28"><Document /></el-icon>
           </template>
         </el-table-column>
         <el-table-column prop="name" label="名称" />
@@ -353,10 +408,13 @@ function back() {
 </template>
 
 <style scoped>
-.page { height: 100vh; }
-.header { display: flex; align-items: center; height: 60px; gap: 6px; }
+.page { height: 100%; display: flex; flex-direction: column; }
+.header { display: flex; align-items: center; padding: 6px 12px; gap: 6px; }
+.page-title { margin: 0 8px 0 4px; font-size: 20px; color: var(--el-text-color-primary); }
 a { cursor: pointer; color: #409eff; }
 .preview-body { display: flex; justify-content: center; align-items: center; min-height: 50vh; }
 .preview-media { max-width: 100%; max-height: 70vh; }
 .preview-text { width: 100%; max-height: 70vh; overflow: auto; background: #f5f7fa; padding: 12px; border-radius: 4px; white-space: pre-wrap; word-break: break-all; font-family: Consolas, Monaco, monospace; font-size: 13px; }
+.thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; cursor: pointer; display: block; background: #f5f7fa; }
+.thumb-ph { color: #c0c4cc; }
 </style>
