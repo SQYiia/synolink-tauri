@@ -91,15 +91,25 @@ async function scan() {
     let finished = false
     let idleRounds = 0
 
+    let debugLogged = false
     for (let iter = 0; iter < MAX_ITER; iter++) {
       if (gen !== scanGen) return
-      const list: any = await dsm.searchList(taskid, { offset, limit: PAGE })
+      const list: any = await dsm.searchList(taskid, {
+        offset,
+        limit: PAGE,
+        additional: '["real_path","size","time","type","perm"]',
+      })
       if (!list.success) break
       const d = list.data ?? {}
       const batch: any[] = d.files ?? []
       finished = !!d.finished
 
       if (batch.length > 0) {
+        if (!debugLogged) {
+          // eslint-disable-next-line no-console
+          console.log('[Videos] 首条搜索结果结构:', JSON.parse(JSON.stringify(batch[0])))
+          debugLogged = true
+        }
         for (const f of batch) markRaw(f)
         collected.push(...batch)
         offset += batch.length
@@ -147,13 +157,19 @@ watch(playerOpen, (open) => {
   }
 })
 
-function formatSize(n?: number) {
-  if (!n) return ''
+function formatSize(n?: number | string) {
+  const num = typeof n === 'string' ? Number(n) : (n ?? 0)
+  if (!num || isNaN(num)) return ''
   const u = ['B', 'KB', 'MB', 'GB', 'TB']
   let i = 0
-  let v = n
+  let v = num
   while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
   return v.toFixed(i === 0 ? 0 : 1) + ' ' + u[i]
+}
+
+/** 从多种可能字段中兜底取文件大小 */
+function sizeOf(v: any): number | string | undefined {
+  return v?.additional?.size ?? v?.size ?? v?.filesize ?? v?.additional?.real_size
 }
 
 /** 用扩展名推测清晰度标签（纯装饰） */
@@ -240,7 +256,7 @@ watch(() => dsm.baseUrl, () => {
           <div class="meta">
             <div class="name">{{ v.name }}</div>
             <div class="row">
-              <span class="size">{{ formatSize(v.additional?.size) }}</span>
+              <span class="size">{{ formatSize(sizeOf(v)) }}</span>
               <el-button size="small" link type="primary" @click="openExternal(v, $event)">
                 <el-icon style="margin-right:3px"><Monitor /></el-icon>
                 系统播放器

@@ -93,15 +93,25 @@ async function scan() {
     let finished = false
     let idleRounds = 0
 
+    let debugLogged = false
     for (let iter = 0; iter < MAX_ITER; iter++) {
       if (gen !== scanGen) return
-      const list: any = await dsm.searchList(taskid, { offset, limit: PAGE })
+      const list: any = await dsm.searchList(taskid, {
+        offset,
+        limit: PAGE,
+        additional: '["real_path","size","time","type","perm"]',
+      })
       if (!list.success) break
       const d = list.data ?? {}
       const batch: any[] = d.files ?? []
       finished = !!d.finished
 
       if (batch.length > 0) {
+        if (!debugLogged) {
+          // eslint-disable-next-line no-console
+          console.log('[Album] 首条搜索结果结构:', JSON.parse(JSON.stringify(batch[0])))
+          debugLogged = true
+        }
         // markRaw 避免 Vue 给每个对象建立深度响应，大数组渲染开销显著下降
         for (const f of batch) markRaw(f)
         collected.push(...batch)
@@ -130,12 +140,42 @@ async function scan() {
   }
 }
 
+/**
+ * 从文件名中解析拍摄时间，返回秒级时间戳；解析失败返回 0。
+ * 兼容常见相机/手机命名：IMG_20240315_103055.jpg / PXL_20240315_103055123.jpg /
+ * 2024-03-15 10.30.55.jpg / IMG-20240315-WA0001.jpg / Screenshot_20240315-103055.png 等
+ */
+function parseNameTime(name: string): number {
+  if (!name) return 0
+  const m = name.match(/(19|20)(\d{2})[-_]?(\d{2})[-_]?(\d{2})(?:[\s_\-T]?(\d{2})[\.\-:]?(\d{2})(?:[\.\-:]?(\d{2}))?)?/)
+  if (!m) return 0
+  const y = Number(m[1] + m[2])
+  const mo = Number(m[3])
+  const d = Number(m[4])
+  if (y < 1990 || y > 2100 || mo < 1 || mo > 12 || d < 1 || d > 31) return 0
+  const hh = Number(m[5] ?? '0')
+  const mi = Number(m[6] ?? '0')
+  const ss = Number(m[7] ?? '0')
+  const t = new Date(y, mo - 1, d, hh, mi, ss).getTime()
+  if (isNaN(t)) return 0
+  return Math.floor(t / 1000)
+}
+
+/** 获取照片时间（秒级）：文件名 > crtime > mtime */
+function photoTime(p: any): number {
+  const byName = parseNameTime(p?.name || '')
+  if (byName) return byName
+  const cr = Number(p?.additional?.time?.crtime ?? 0)
+  if (cr) return cr
+  return Number(p?.additional?.time?.mtime ?? 0)
+}
+
 /** 全量按日期倒序的扫平列表（用于 viewer 翻页） */
 const flatPhotos = computed(() => {
   const arr = [...photos.value]
   arr.sort((a, b) => {
-    const ta = Number(a.additional?.time?.mtime ?? 0)
-    const tb = Number(b.additional?.time?.mtime ?? 0)
+    const ta = photoTime(a)
+    const tb = photoTime(b)
     if (!ta && !tb) return 0
     if (!ta) return 1
     if (!tb) return -1
@@ -151,10 +191,10 @@ const visiblePhotos = computed(() => flatPhotos.value.slice(0, visibleCount.valu
 const groupedPhotos = computed(() => {
   const map = new Map<string, any[]>()
   for (const p of visiblePhotos.value) {
-    const t = p.additional?.time?.mtime
+    const t = photoTime(p)
     let key = '未知日期'
     if (t) {
-      const d = new Date(Number(t) * 1000)
+      const d = new Date(t * 1000)
       key = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`
     }
     if (!map.has(key)) map.set(key, [])

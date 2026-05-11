@@ -286,14 +286,19 @@ export class DsmClient {
     })
   }
 
-  /** 搜索：拉取结果 */
-  async searchList(taskid: string, opts: { offset?: number; limit?: number } = {}) {
+  /** 搜索：拉取结果
+   *  注意：DSM 不同版本对 additional 的接受格式不一致（逗号分隔 vs JSON 数组）。
+   *  默认使用 JSON 数组形式，兼容性更好。 */
+  async searchList(
+    taskid: string,
+    opts: { offset?: number; limit?: number; additional?: string } = {},
+  ) {
     return this.entry('SYNO.FileStation.Search', 'list', {
       params: {
         taskid,
         offset: opts.offset ?? 0,
         limit: opts.limit ?? 100,
-        additional: 'size,time,type',
+        additional: opts.additional ?? '["real_path","size","time","type","perm"]',
       },
     })
   }
