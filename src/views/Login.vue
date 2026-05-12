@@ -47,37 +47,45 @@ async function submit() {
   }
   loading.value = true
   try {
-    const res = await dsm.login({ account: form.account, passwd: form.passwd, otp_code: form.otp_code })
-    if (res.success) {
-      // 保存账号
-      const existed = app.accounts.find(a => a.serverId === serverId && a.account === form.account)
-      if (existed) {
-        existed.password = form.passwd
-        existed.lastLoginTime = Date.now()
-        await app.saveAccounts()
-        await app.setCurrent(serverId, existed.id)
+    let needOtp = true
+    while (needOtp) {
+      needOtp = false
+      const res = await dsm.login({ account: form.account, passwd: form.passwd, otp_code: form.otp_code })
+      if (res.success) {
+        const existed = app.accounts.find(a => a.serverId === serverId && a.account === form.account)
+        if (existed) {
+          existed.password = form.passwd
+          existed.lastLoginTime = Date.now()
+          await app.saveAccounts()
+          await app.setCurrent(serverId, existed.id)
+        } else {
+          const acc = await app.addAccount({
+            serverId,
+            account: form.account,
+            password: form.passwd,
+            lastLoginTime: Date.now(),
+          })
+          await app.setCurrent(serverId, acc.id)
+        }
+        ElMessage.success('登录成功')
+        router.replace('/app/files')
       } else {
-        const acc = await app.addAccount({
-          serverId,
-          account: form.account,
-          password: form.passwd,
-          lastLoginTime: Date.now(),
-        })
-        await app.setCurrent(serverId, acc.id)
+        const code = res.error?.code
+        if (code === 400) {
+          ElMessage.error('账号或密码错误')
+        } else if (code === 403 || code === 404) {
+          const otp = await ElMessageBox.prompt('需要两步验证，请输入 OTP 验证码', '验证', { inputPattern: /^\d+$/, inputErrorMessage: '请输入数字' })
+          form.otp_code = otp.value
+          needOtp = true
+        } else {
+          ElMessage.error(`登录失败：code=${code}`)
+        }
       }
-      ElMessage.success('登录成功')
-      router.replace('/app/files')
-    } else {
-      const code = res.error?.code
-      if (code === 400) ElMessage.error('账号或密码错误')
-      else if (code === 403 || code === 404) {
-        const otp = await ElMessageBox.prompt('需要两步验证，请输入 OTP 验证码', '验证', { inputPattern: /^\d+$/, inputErrorMessage: '请输入数字' })
-        form.otp_code = otp.value
-        await submit()
-      } else ElMessage.error(`登录失败：code=${code}`)
     }
   } catch (e: any) {
-    ElMessage.error(`请求异常：${e?.message ?? e}`)
+    if ((e as any) !== 'cancel') {
+      ElMessage.error(`请求异常：${e?.message ?? e}`)
+    }
   } finally {
     loading.value = false
   }

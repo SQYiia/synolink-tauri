@@ -5,11 +5,6 @@ const routes = [
   { path: '/servers', component: () => import('../views/ServerList.vue') },
   { path: '/add-server', component: () => import('../views/AddServer.vue') },
   { path: '/login/:serverId', component: () => import('../views/Login.vue') },
-  // 旧路由兼容（部分地方仍用 /home /files），统一重定向到新 Shell 路由
-  { path: '/home', redirect: '/app/me' },
-  { path: '/files', redirect: '/app/files' },
-  { path: '/album', redirect: '/app/album' },
-  { path: '/videos', redirect: '/app/videos' },
   // 主 Shell：底部 tab 布局
   {
     path: '/app',

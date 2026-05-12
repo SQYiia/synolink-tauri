@@ -17,16 +17,14 @@ function onMqlChange(e: MediaQueryListEvent) {
 
 onMounted(() => {
   app.load()
-  try {
-    mql = window.matchMedia('(prefers-color-scheme: dark)')
-    applyTheme(mql.matches)
-    mql.addEventListener('change', onMqlChange)
-  } catch {}
+  mql = window.matchMedia('(prefers-color-scheme: dark)')
+  applyTheme(mql.matches)
+  mql.addEventListener('change', onMqlChange)
 })
 
 onUnmounted(() => {
   if (mql) {
-    try { mql.removeEventListener('change', onMqlChange) } catch {}
+    mql.removeEventListener('change', onMqlChange)
   }
 })
 </script>

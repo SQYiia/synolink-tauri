@@ -3,6 +3,7 @@ import { onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '../stores/app'
 import { dsm } from '../api/dsm'
+import { formatBytes, formatSpeed } from '../utils/format'
 
 const router = useRouter()
 const app = useAppStore()
@@ -71,7 +72,7 @@ async function refreshUtil() {
       diskWrite.value = Number(total2.write_byte ?? 0)
       lastUpdate.value = new Date().toLocaleTimeString()
     }
-  } catch {}
+  } catch (e) { console.warn('[Me] refreshUtil failed:', e) }
 }
 
 async function refreshStorage() {
@@ -80,7 +81,7 @@ async function refreshStorage() {
     if (res.success && res.data) {
       volumes.value = ((res.data as any).volumes ?? []) as any[]
     }
-  } catch {}
+  } catch (e) { console.warn('[Me] refreshStorage failed:', e) }
 }
 
 async function refreshShares() {
@@ -90,18 +91,9 @@ async function refreshShares() {
       const shares: any[] = (res.data as any)?.shares ?? []
       sharesCount.value = shares.length
     }
-  } catch {}
+  } catch (e) { console.warn('[Me] refreshShares failed:', e) }
 }
 
-function formatBytes(n?: number) {
-  if (!n) return '0 B'
-  const u = ['B', 'KB', 'MB', 'GB', 'TB']
-  let i = 0
-  let v = n
-  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
-  return v.toFixed(i === 0 ? 0 : 1) + ' ' + u[i]
-}
-function formatSpeed(n?: number) { return formatBytes(n) + '/s' }
 function volPct(v: any) {
   const used = Number(v.used ?? 0)
   const size = Number(v.size ?? v.total ?? 0)
@@ -114,7 +106,7 @@ function pctColor(p: number) {
 }
 
 async function logout() {
-  try { await dsm.logout() } catch {}
+  try { await dsm.logout() } catch (e) { console.warn('[Me] logout failed:', e) }
   dsm.synoToken = ''
   dsm.sid = ''
   router.replace('/servers')

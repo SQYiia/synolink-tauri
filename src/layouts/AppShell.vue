@@ -64,7 +64,7 @@ const tabs = [
       </div>
       <RouterView v-else v-slot="{ Component }">
         <Transition name="page-fade" mode="out-in">
-          <keep-alive>
+          <keep-alive :max="4">
             <component :is="Component" :key="$route.path" />
           </keep-alive>
         </Transition>

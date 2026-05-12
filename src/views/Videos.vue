@@ -1,60 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch, markRaw, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { dsm } from '../api/dsm'
+import { formatBytes } from '../utils/format'
+import { useMediaScan } from '../composables/useMediaScan'
 import FolderPicker from '../components/FolderPicker.vue'
 import LazyThumb from '../components/LazyThumb.vue'
-
-const router = useRouter()
-const folder = ref('')
-const loading = ref(false)
-const videos = shallowRef<any[]>([])
-const playerOpen = ref(false)
-const playingSrc = ref('')
-const playingName = ref('')
-const pickerOpen = ref(false)
-let scanGen = 0
-
-const VISIBLE_INIT = 40
-const VISIBLE_STEP = 40
-const visibleCount = ref(VISIBLE_INIT)
-const sentinel = ref<HTMLElement | null>(null)
-let sentinelObserver: IntersectionObserver | null = null
-
-const STORAGE_KEY = computed(() => `video:folder:${dsm.baseUrl}`)
-
-onMounted(() => {
-  if (!dsm.sid) {
-    router.replace('/servers')
-    return
-  }
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY.value)
-    if (saved) {
-      folder.value = saved
-      scan()
-    }
-  } catch {}
-
-  nextTick(() => {
-    if (!sentinel.value) return
-    sentinelObserver = new IntersectionObserver((entries) => {
-      for (const e of entries) {
-        if (e.isIntersecting && visibleCount.value < videos.value.length) {
-          visibleCount.value = Math.min(videos.value.length, visibleCount.value + VISIBLE_STEP)
-        }
-      }
-    }, { rootMargin: '800px', threshold: 0 })
-    sentinelObserver.observe(sentinel.value)
-  })
-})
-
-onBeforeUnmount(() => {
-  sentinelObserver?.disconnect()
-  sentinelObserver = null
-})
 
 const VIDEO_EXT = new Set(['mp4', 'webm', 'mov', 'mkv', 'avi', 'ts', 'm4v', 'mpg', 'mpeg', 'wmv', 'flv', '3gp'])
 
@@ -65,84 +17,35 @@ function isVideo(f: any): boolean {
   return VIDEO_EXT.has(ext)
 }
 
-async function scan() {
-  if (!folder.value) return
-  loading.value = true
-  videos.value = []
-  visibleCount.value = VISIBLE_INIT
-  scanGen++
-  const gen = scanGen
-  let taskid = ''
-  try {
-    const start = await dsm.searchStart(folder.value, '', true, {
-      extension: 'mp4,webm,mov,mkv,avi,ts,m4v,mpg,mpeg,wmv,flv,3gp',
-      filetype: 'file',
-    })
-    if (!start.success || !start.data?.taskid) {
-      ElMessage.error('启动扫描失败 (code=' + (start.error?.code ?? '?') + ')')
-      return
-    }
-    taskid = start.data.taskid
+const {
+  folder, loading, items: videos, visibleCount, visibleItems: visibleVideos, sentinel,
+  scan, onPickFolder, onBaseUrlChange, initFromStorage, setupSentinel, cleanup,
+} = useMediaScan({
+  extensions: 'mp4,webm,mov,mkv,avi,ts,m4v,mpg,mpeg,wmv,flv,3gp',
+  filterFn: isVideo,
+  visibleInit: 40,
+  visibleStep: 40,
+  storageKeyPrefix: 'video:folder',
+})
 
-    const collected: any[] = []
-    let offset = 0
-    const PAGE = 500
-    const MAX_ITER = 400
-    let finished = false
-    let idleRounds = 0
+const playerOpen = ref(false)
+const playingSrc = ref('')
+const playingName = ref('')
+const pickerOpen = ref(false)
 
-    let debugLogged = false
-    for (let iter = 0; iter < MAX_ITER; iter++) {
-      if (gen !== scanGen) return
-      const list: any = await dsm.searchList(taskid, {
-        offset,
-        limit: PAGE,
-        additional: '["real_path","size","time","type","perm"]',
-      })
-      if (!list.success) break
-      const d = list.data ?? {}
-      const batch: any[] = d.files ?? []
-      finished = !!d.finished
+onMounted(() => {
+  const hasFolder = initFromStorage()
+  if (hasFolder) scan()
+  setupSentinel()
+})
 
-      if (batch.length > 0) {
-        if (!debugLogged) {
-          // eslint-disable-next-line no-console
-          console.log('[Videos] 首条搜索结果结构:', JSON.parse(JSON.stringify(batch[0])))
-          debugLogged = true
-        }
-        for (const f of batch) markRaw(f)
-        collected.push(...batch)
-        offset += batch.length
-        videos.value = collected.filter(isVideo)
-        idleRounds = 0
-        // 每拉完一页让出一帧，避免长时间独占主线程造成其他 Tab 卡顿
-        await new Promise<void>((r) => requestAnimationFrame(() => r()))
-      } else {
-        idleRounds++
-      }
+onBeforeUnmount(() => { cleanup() })
 
-      if (finished && batch.length === 0) break
-      if (batch.length === 0) {
-        if (idleRounds > 20) break
-        await new Promise((r) => setTimeout(r, 500))
-      }
-    }
-
-    ElMessage.success(`扫描完成：${videos.value.length} 个视频`)
-  } catch (e: any) {
-    ElMessage.error('扫描出错: ' + (e?.message ?? e))
-  } finally {
-    if (taskid) await dsm.searchStop(taskid).catch(() => {})
-    loading.value = false
-  }
-}
+watch(() => dsm.baseUrl, () => { onBaseUrlChange() })
 
 function coverOf(v: any) {
   return dsm.mediaUrl('thumb', v.path, { size: 'small' })
 }
-
-/** 实际渲染到 DOM 的部分 */
-const visibleVideos = computed(() => videos.value.slice(0, visibleCount.value))
 
 function play(v: any) {
   playingName.value = v.name
@@ -157,31 +60,13 @@ watch(playerOpen, (open) => {
   }
 })
 
-function formatSize(n?: number | string) {
-  const num = typeof n === 'string' ? Number(n) : (n ?? 0)
-  if (!num || isNaN(num)) return ''
-  const u = ['B', 'KB', 'MB', 'GB', 'TB']
-  let i = 0
-  let v = num
-  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
-  return v.toFixed(i === 0 ? 0 : 1) + ' ' + u[i]
-}
-
-/** 从多种可能字段中兜底取文件大小 */
 function sizeOf(v: any): number | string | undefined {
   return v?.additional?.size ?? v?.size ?? v?.filesize ?? v?.additional?.real_size
 }
 
-/** 用扩展名推测清晰度标签（纯装饰） */
 function qualityTag(v: any): string {
   const ext = (v.name as string)?.toLowerCase().split('.').pop() ?? ''
   return ext.toUpperCase()
-}
-
-function onPickFolder(p: string) {
-  folder.value = p
-  try { localStorage.setItem(STORAGE_KEY.value, p) } catch {}
-  scan()
 }
 
 async function openExternal(v: any, e: Event) {
@@ -193,16 +78,6 @@ async function openExternal(v: any, e: Event) {
     ElMessage.error('打开外部播放器失败: ' + (err?.message ?? err))
   }
 }
-
-watch(() => dsm.baseUrl, () => {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY.value)
-    folder.value = saved ?? ''
-    videos.value = []
-    visibleCount.value = VISIBLE_INIT
-    if (saved) scan()
-  } catch {}
-})
 </script>
 
 <template>
@@ -256,7 +131,7 @@ watch(() => dsm.baseUrl, () => {
           <div class="meta">
             <div class="name">{{ v.name }}</div>
             <div class="row">
-              <span class="size">{{ formatSize(sizeOf(v)) }}</span>
+              <span class="size">{{ formatBytes(sizeOf(v)) }}</span>
               <el-button size="small" link type="primary" @click="openExternal(v, $event)">
                 <el-icon style="margin-right:3px"><Monitor /></el-icon>
                 系统播放器

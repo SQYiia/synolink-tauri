@@ -1,62 +1,9 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch, markRaw, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { dsm } from '../api/dsm'
+import { useMediaScan } from '../composables/useMediaScan'
 import FolderPicker from '../components/FolderPicker.vue'
 import LazyThumb from '../components/LazyThumb.vue'
-
-const router = useRouter()
-const folder = ref('')
-const loading = ref(false)
-const photos = shallowRef<any[]>([])
-const viewerOpen = ref(false)
-const viewerIndex = ref(0)
-const pickerOpen = ref(false)
-let scanGen = 0
-
-/** 渐进加载：初始展示数量，滴到底部哨兵时追加 */
-const VISIBLE_INIT = 120
-const VISIBLE_STEP = 120
-const visibleCount = ref(VISIBLE_INIT)
-const sentinel = ref<HTMLElement | null>(null)
-let sentinelObserver: IntersectionObserver | null = null
-
-const STORAGE_KEY = computed(() => `album:folder:${dsm.baseUrl}`)
-
-onMounted(() => {
-  if (!dsm.sid) {
-    router.replace('/servers')
-    return
-  }
-  // 读取持久化目录
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY.value)
-    if (saved) {
-      folder.value = saved
-      // 自动扫描一次
-      scan()
-    }
-  } catch {}
-
-  // 底部哨兵：进视口就追加一批到 DOM
-  nextTick(() => {
-    if (!sentinel.value) return
-    sentinelObserver = new IntersectionObserver((entries) => {
-      for (const e of entries) {
-        if (e.isIntersecting && visibleCount.value < photos.value.length) {
-          visibleCount.value = Math.min(photos.value.length, visibleCount.value + VISIBLE_STEP)
-        }
-      }
-    }, { rootMargin: '800px', threshold: 0 })
-    sentinelObserver.observe(sentinel.value)
-  })
-})
-
-onBeforeUnmount(() => {
-  sentinelObserver?.disconnect()
-  sentinelObserver = null
-})
 
 const IMG_EXT = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic'])
 
@@ -67,83 +14,33 @@ function isImage(f: any): boolean {
   return IMG_EXT.has(ext)
 }
 
-async function scan() {
-  if (!folder.value) return
-  loading.value = true
-  photos.value = []
-  visibleCount.value = VISIBLE_INIT
-  scanGen++
-  const gen = scanGen
-  let taskid = ''
-  try {
-    const start = await dsm.searchStart(folder.value, '', true, {
-      extension: 'jpg,jpeg,png,gif,webp,bmp,heic',
-      filetype: 'file',
-    })
-    if (!start.success || !start.data?.taskid) {
-      ElMessage.error('启动扫描失败 (code=' + (start.error?.code ?? '?') + ')')
-      return
-    }
-    taskid = start.data.taskid
+const {
+  folder, loading, items: photos, visibleCount, sentinel,
+  scan, onPickFolder, onBaseUrlChange, initFromStorage, setupSentinel, cleanup,
+} = useMediaScan({
+  extensions: 'jpg,jpeg,png,gif,webp,bmp,heic',
+  filterFn: isImage,
+  visibleInit: 120,
+  visibleStep: 120,
+  storageKeyPrefix: 'album:folder',
+})
 
-    const collected: any[] = []
-    let offset = 0
-    const PAGE = 500
-    const MAX_ITER = 400
-    let finished = false
-    let idleRounds = 0
+const viewerOpen = ref(false)
+const viewerIndex = ref(0)
+const pickerOpen = ref(false)
 
-    let debugLogged = false
-    for (let iter = 0; iter < MAX_ITER; iter++) {
-      if (gen !== scanGen) return
-      const list: any = await dsm.searchList(taskid, {
-        offset,
-        limit: PAGE,
-        additional: '["real_path","size","time","type","perm"]',
-      })
-      if (!list.success) break
-      const d = list.data ?? {}
-      const batch: any[] = d.files ?? []
-      finished = !!d.finished
+onMounted(() => {
+  const hasFolder = initFromStorage()
+  if (hasFolder) scan()
+  setupSentinel()
+})
 
-      if (batch.length > 0) {
-        if (!debugLogged) {
-          // eslint-disable-next-line no-console
-          console.log('[Album] 首条搜索结果结构:', JSON.parse(JSON.stringify(batch[0])))
-          debugLogged = true
-        }
-        // markRaw 避免 Vue 给每个对象建立深度响应，大数组渲染开销显著下降
-        for (const f of batch) markRaw(f)
-        collected.push(...batch)
-        offset += batch.length
-        photos.value = collected.filter(isImage)
-        idleRounds = 0
-        // 每拉完一页让出一帧，避免长时间独占主线程造成其他 Tab / 输入卡顿
-        await new Promise<void>((r) => requestAnimationFrame(() => r()))
-      } else {
-        idleRounds++
-      }
+onBeforeUnmount(() => { cleanup() })
 
-      if (finished && batch.length === 0) break
-      if (batch.length === 0) {
-        if (idleRounds > 20) break
-        await new Promise((r) => setTimeout(r, 500))
-      }
-    }
-
-    ElMessage.success(`扫描完成：${photos.value.length} 张图片`)
-  } catch (e: any) {
-    ElMessage.error('扫描出错: ' + (e?.message ?? e))
-  } finally {
-    if (taskid) await dsm.searchStop(taskid).catch(() => {})
-    loading.value = false
-  }
-}
+watch(() => dsm.baseUrl, () => { onBaseUrlChange() })
 
 /**
  * 从文件名中解析拍摄时间，返回秒级时间戳；解析失败返回 0。
- * 兼容常见相机/手机命名：IMG_20240315_103055.jpg / PXL_20240315_103055123.jpg /
- * 2024-03-15 10.30.55.jpg / IMG-20240315-WA0001.jpg / Screenshot_20240315-103055.png 等
  */
 function parseNameTime(name: string): number {
   if (!name) return 0
@@ -170,7 +67,7 @@ function photoTime(p: any): number {
   return Number(p?.additional?.time?.mtime ?? 0)
 }
 
-/** 全量按日期倒序的扫平列表（用于 viewer 翻页） */
+/** 全量按日期倒序 */
 const flatPhotos = computed(() => {
   const arr = [...photos.value]
   arr.sort((a, b) => {
@@ -220,23 +117,6 @@ function openPhoto(p: any) {
 }
 function prev() { if (viewerIndex.value > 0) viewerIndex.value-- }
 function next() { if (viewerIndex.value < flatPhotos.value.length - 1) viewerIndex.value++ }
-
-function onPickFolder(p: string) {
-  folder.value = p
-  try { localStorage.setItem(STORAGE_KEY.value, p) } catch {}
-  scan()
-}
-
-// baseUrl 变化时（切换服务器）重读持久化
-watch(() => dsm.baseUrl, () => {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY.value)
-    folder.value = saved ?? ''
-    photos.value = []
-    visibleCount.value = VISIBLE_INIT
-    if (saved) scan()
-  } catch {}
-})
 </script>
 
 <template>

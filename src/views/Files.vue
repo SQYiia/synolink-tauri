@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { dsm } from '../api/dsm'
+import { formatBytes } from '../utils/format'
 
 const router = useRouter()
 const loading = ref(false)
@@ -195,12 +196,18 @@ async function doSearch() {
     }
     searchTaskId.value = start.data.taskid
     inSearchMode.value = true
-    // 轮询 3 次
     let results: any[] = []
-    for (let i = 0; i < 3; i++) {
-      await new Promise((r) => setTimeout(r, 700))
+    const MAX_WAIT = 10000
+    const POLL_INTERVAL = 500
+    const startTime = Date.now()
+    while (Date.now() - startTime < MAX_WAIT) {
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL))
       const list = await dsm.searchList(searchTaskId.value, { limit: 500 })
-      if (list.success) results = (list.data as any)?.files ?? []
+      if (list.success) {
+        const data = list.data as any
+        results = data?.files ?? []
+        if (data?.finished) break
+      }
     }
     items.value = results
     await dsm.searchStop(searchTaskId.value).catch(() => {})
@@ -267,18 +274,6 @@ watch(previewOpen, (v) => {
   }
   if (!v) previewSrc.value = ''
 })
-
-function formatSize(n?: number) {
-  if (!n) return ''
-  const u = ['B', 'KB', 'MB', 'GB', 'TB']
-  let i = 0
-  let v = n
-  while (v >= 1024 && i < u.length - 1) {
-    v /= 1024
-    i++
-  }
-  return v.toFixed(i === 0 ? 0 : 1) + ' ' + u[i]
-}
 
 function isRowDir(row: any) {
   return row.isdir ?? !row.additional?.size
@@ -372,7 +367,7 @@ onUnmounted(() => {
         </el-table-column>
         <el-table-column prop="name" label="名称" />
         <el-table-column label="大小" width="110">
-          <template #default="{ row }">{{ isRowDir(row) ? '—' : formatSize(row.additional?.size) }}</template>
+          <template #default="{ row }">{{ isRowDir(row) ? '—' : formatBytes(row.additional?.size) }}</template>
         </el-table-column>
         <el-table-column label="修改时间" width="170">
           <template #default="{ row }">

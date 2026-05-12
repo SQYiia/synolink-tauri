@@ -199,7 +199,7 @@ export class DsmClient {
           sid: this.sid,
           synoToken: this.synoToken,
         })
-      } catch {}
+      } catch (e) { console.warn('[dsm] set_session failed:', e) }
     }
     return res
   }
@@ -207,7 +207,7 @@ export class DsmClient {
   /** 登出（doc 3.2） */
   async logout() {
     const res = await this.entry('SYNO.API.Auth', 'logout', { params: { session: 'webui' } })
-    try { await invoke('clear_session') } catch {}
+    try { await invoke('clear_session') } catch (e) { console.warn('[dsm] clear_session failed:', e) }
     return res
   }
 
