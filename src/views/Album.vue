@@ -346,45 +346,52 @@ watch(() => dsm.baseUrl, () => {
 .page { padding: 12px 16px 24px; max-width: 1400px; margin: 0 auto; }
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 6px 0 12px;
+  padding: 8px 0 14px;
 }
-.title { margin: 0; font-size: 22px; color: var(--el-text-color-primary); }
+.title { margin: 0; font-size: 24px; font-weight: 700; color: var(--el-text-color-primary); }
 .actions { display: flex; gap: 8px; }
 .folder-bar {
-  display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--el-text-color-secondary);
-  background: var(--el-bg-color); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px;
+  display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--el-text-color-secondary);
+  background: var(--sl-bg-card); border-radius: var(--sl-radius-md); padding: 10px 14px; margin-bottom: 14px;
+  box-shadow: var(--sl-shadow-sm);
 }
 .folder-path { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.count { color: var(--el-color-primary); font-weight: 600; }
+.count { color: var(--sl-primary); font-weight: 600; }
 .body { min-height: 200px; }
 .empty { text-align: center; padding: 80px 0; color: var(--el-text-color-secondary); }
 .date-group { margin-bottom: 20px; }
 .date-title {
   display: flex; align-items: center; gap: 6px;
-  margin: 0 0 10px; padding: 6px 0;
-  font-size: 15px; color: var(--el-text-color-primary);
-  position: sticky; top: 0; background: var(--el-bg-color-page); z-index: 1;
+  margin: 0 0 10px; padding: 8px 12px;
+  font-size: 15px; font-weight: 600; color: var(--el-text-color-primary);
+  position: sticky; top: 0;
+  background: var(--sl-surface);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: var(--sl-radius-sm);
+  z-index: 1;
 }
 .date-count {
   margin-left: 6px; font-size: 12px; color: var(--el-text-color-secondary); font-weight: 400;
 }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 4px; }
 .sentinel {
   text-align: center; padding: 16px 0; font-size: 12px; color: var(--el-text-color-secondary);
   min-height: 40px;
 }
 .cell {
-  cursor: pointer; border-radius: 4px; overflow: hidden; background: var(--el-fill-color);
-  aspect-ratio: 1 / 1; transition: transform 0.15s;
+  cursor: pointer; border-radius: var(--sl-radius-sm); overflow: hidden; background: var(--el-fill-color);
+  aspect-ratio: 1 / 1;
+  transition: transform var(--sl-transition-fast), box-shadow var(--sl-transition-fast);
 }
-.cell:hover { transform: scale(1.03); }
-.tile { width: 100%; height: 100%; object-fit: cover; display: block; background: var(--el-fill-color); }
-.tile.placeholder { display: flex; align-items: center; justify-content: center; color: var(--el-text-color-placeholder); }
-.viewer { position: relative; display: flex; justify-content: center; align-items: center; min-height: 70vh; background: #000; }
+.cell:hover { transform: scale(1.04); box-shadow: var(--sl-shadow-md); z-index: 2; position: relative; }
+.cell:active { transform: scale(0.97); }
+.viewer { position: relative; display: flex; justify-content: center; align-items: center; min-height: 70vh; background: #000; border-radius: var(--sl-radius-md); overflow: hidden; }
 .viewer-img { max-width: 100%; max-height: 80vh; object-fit: contain; }
 .viewer-img.placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 300px; height: 300px; background: #222; color: #ccc; }
-.nav { position: absolute; top: 50%; transform: translateY(-50%); }
-.nav.left { left: 10px; }
-.nav.right { right: 10px; }
-.viewer-counter { text-align: center; color: var(--el-text-color-secondary); margin-top: 8px; }
+.nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(255,255,255,0.15) !important; backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.3) !important; color: #fff !important; }
+.nav:hover { background: rgba(255,255,255,0.25) !important; }
+.nav.left { left: 12px; }
+.nav.right { right: 12px; }
+.viewer-counter { text-align: center; color: var(--el-text-color-secondary); margin-top: 8px; font-size: 13px; }
 </style>

@@ -118,12 +118,14 @@ function onError() { failed.value = true }
   position: relative;
   background: var(--el-fill-color);
   overflow: hidden;
+  border-radius: inherit;
 }
 .img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
+  transition: opacity var(--sl-transition-normal, 0.25s);
 }
 .fallback,
 .placeholder {

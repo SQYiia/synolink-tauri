@@ -127,18 +127,21 @@ function switchServer() {
 
 <template>
   <div class="page" v-loading="loading">
-    <!-- 顶部个人卡片 -->
+    <!-- 顶部个人卡片 - 渐变背景 -->
     <div class="profile">
-      <div class="avatar">
-        <el-icon :size="36"><UserFilled /></el-icon>
+      <div class="profile-bg"></div>
+      <div class="profile-content">
+        <div class="avatar">
+          <el-icon :size="32"><UserFilled /></el-icon>
+        </div>
+        <div class="info">
+          <div class="name">{{ app.accounts.find(a => a.id === app.currentAccountId)?.account || '未登录' }}</div>
+          <div class="sub">{{ dsm.baseUrl || '—' }}</div>
+        </div>
+        <el-button @click="refreshAll" circle class="refresh-btn">
+          <el-icon><Refresh /></el-icon>
+        </el-button>
       </div>
-      <div class="info">
-        <div class="name">{{ app.accounts.find(a => a.id === app.currentAccountId)?.account || '未登录' }}</div>
-        <div class="sub">{{ dsm.baseUrl || '—' }}</div>
-      </div>
-      <el-button @click="refreshAll" circle plain>
-        <el-icon><Refresh /></el-icon>
-      </el-button>
     </div>
 
     <!-- 监控区 -->
@@ -147,80 +150,190 @@ function switchServer() {
       <span class="right">更新于 {{ lastUpdate || '—' }}</span>
     </div>
     <div class="grid">
-      <el-card shadow="never" class="card">
-        <div class="title">CPU</div>
-        <el-progress type="dashboard" :percentage="cpuPct" :color="pctColor(cpuPct)" :width="110" />
-      </el-card>
-      <el-card shadow="never" class="card">
-        <div class="title">内存</div>
-        <el-progress type="dashboard" :percentage="memPct" :color="pctColor(memPct)" :width="110" />
-        <div class="sub">{{ formatBytes(memUsed) }} / {{ formatBytes(memTotal) }}</div>
-      </el-card>
-      <el-card shadow="never" class="card">
-        <div class="title">网络</div>
-        <div class="row"><span>↑ 上行</span><b>{{ formatSpeed(netSend) }}</b></div>
-        <div class="row"><span>↓ 下行</span><b>{{ formatSpeed(netRecv) }}</b></div>
-      </el-card>
-      <el-card shadow="never" class="card">
-        <div class="title">磁盘</div>
-        <div class="row"><span>读取</span><b>{{ formatSpeed(diskRead) }}</b></div>
-        <div class="row"><span>写入</span><b>{{ formatSpeed(diskWrite) }}</b></div>
-      </el-card>
-      <el-card shadow="never" class="card" v-for="v in volumes" :key="v.id ?? v.volume_path ?? v.fs_type">
-        <div class="title">{{ v.volume_path ?? v.id }}</div>
-        <el-progress :percentage="volPct(v)" :color="pctColor(volPct(v))" />
-        <div class="sub">{{ formatBytes(Number(v.used ?? 0)) }} / {{ formatBytes(Number(v.size ?? v.total ?? 0)) }}</div>
-      </el-card>
+      <div class="stat-card stat-cpu">
+        <div class="stat-label">CPU</div>
+        <el-progress type="dashboard" :percentage="cpuPct" :color="'#fff'" :width="90" :stroke-width="6" define-back-color="rgba(255,255,255,0.2)" />
+        <div class="stat-value">{{ cpuPct }}%</div>
+      </div>
+      <div class="stat-card stat-mem">
+        <div class="stat-label">内存</div>
+        <el-progress type="dashboard" :percentage="memPct" :color="'#fff'" :width="90" :stroke-width="6" define-back-color="rgba(255,255,255,0.2)" />
+        <div class="stat-value">{{ formatBytes(memUsed) }} / {{ formatBytes(memTotal) }}</div>
+      </div>
+      <div class="stat-card stat-net">
+        <div class="stat-label">网络</div>
+        <div class="stat-rows">
+          <div class="stat-row"><span>↑ 上行</span><b>{{ formatSpeed(netSend) }}</b></div>
+          <div class="stat-row"><span>↓ 下行</span><b>{{ formatSpeed(netRecv) }}</b></div>
+        </div>
+      </div>
+      <div class="stat-card stat-disk">
+        <div class="stat-label">磁盘</div>
+        <div class="stat-rows">
+          <div class="stat-row"><span>读取</span><b>{{ formatSpeed(diskRead) }}</b></div>
+          <div class="stat-row"><span>写入</span><b>{{ formatSpeed(diskWrite) }}</b></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 存储卷 -->
+    <div class="section-title" v-if="volumes.length"><span>存储空间</span></div>
+    <div class="volumes">
+      <div v-for="v in volumes" :key="v.id ?? v.volume_path ?? v.fs_type" class="vol-card">
+        <div class="vol-head">
+          <span class="vol-name">{{ v.volume_path ?? v.id }}</span>
+          <span class="vol-pct">{{ volPct(v) }}%</span>
+        </div>
+        <div class="vol-bar">
+          <div class="vol-fill" :style="{ width: volPct(v) + '%', background: pctColor(volPct(v)) }"></div>
+        </div>
+        <div class="vol-detail">{{ formatBytes(Number(v.used ?? 0)) }} / {{ formatBytes(Number(v.size ?? v.total ?? 0)) }}</div>
+      </div>
     </div>
 
     <!-- 账户信息区 -->
-    <div class="section-title"><span>账户</span></div>
-    <el-card shadow="never" class="list">
-      <div class="list-row"><span>共享文件夹</span><b>{{ sharesCount }}</b></div>
-      <div class="list-row"><span>可用 API</span><b>{{ apisCount }}</b></div>
-      <div class="list-row"><span>SynoToken</span><b>{{ dsm.synoToken ? '已注入' : '未下发' }}</b></div>
-    </el-card>
+    <div class="section-title"><span>账户信息</span></div>
+    <div class="info-card">
+      <div class="info-row"><span>共享文件夹</span><b>{{ sharesCount }}</b></div>
+      <div class="info-row"><span>可用 API</span><b>{{ apisCount }}</b></div>
+      <div class="info-row"><span>SynoToken</span><b>{{ dsm.synoToken ? '已注入' : '未下发' }}</b></div>
+    </div>
 
     <!-- 操作区 -->
     <div class="actions">
-      <el-button size="large" @click="switchServer" style="width: 100%">切换服务器</el-button>
-      <el-button size="large" type="danger" @click="logout" style="width: 100%; margin-top: 10px">注销登录</el-button>
+      <el-button size="large" round @click="switchServer" style="width: 100%">切换服务器</el-button>
+      <el-button size="large" type="danger" round @click="logout" style="width: 100%; margin-top: 10px">注销登录</el-button>
     </div>
   </div>
 </template>
 
 <style scoped>
-.page { padding: 16px; max-width: 1200px; margin: 0 auto; }
+.page { padding: 0 16px 24px; max-width: 1200px; margin: 0 auto; }
+
+/* Profile card */
 .profile {
-  display: flex; align-items: center; gap: 14px;
-  background: var(--el-bg-color); padding: 16px; border-radius: 10px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  position: relative;
+  border-radius: var(--sl-radius-lg);
+  overflow: hidden;
+  margin-top: 16px;
+}
+.profile-bg {
+  position: absolute;
+  inset: 0;
+  background: var(--sl-gradient-primary);
+}
+.profile-content {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 24px 20px;
+  z-index: 1;
 }
 .avatar {
-  width: 56px; height: 56px; border-radius: 50%;
-  background: linear-gradient(135deg, #409eff, #53a8ff);
-  color: #fff; display: flex; align-items: center; justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.25);
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .info { flex: 1; }
-.name { font-size: 16px; font-weight: 600; color: var(--el-text-color-primary); }
-.sub { color: var(--el-text-color-secondary); font-size: 12px; margin-top: 4px; }
-.section-title {
-  display: flex; justify-content: space-between; align-items: center;
-  margin: 18px 4px 8px; font-size: 13px; color: var(--el-text-color-secondary); font-weight: 600;
+.name { font-size: 18px; font-weight: 700; color: #fff; }
+.sub { color: rgba(255, 255, 255, 0.8); font-size: 12px; margin-top: 4px; }
+.refresh-btn {
+  background: rgba(255, 255, 255, 0.2) !important;
+  border: 1px solid rgba(255, 255, 255, 0.4) !important;
+  color: #fff !important;
 }
-.section-title .right { font-weight: 400; font-size: 12px; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
-.card { border-radius: 10px; }
-.card .title { font-weight: 600; margin-bottom: 10px; color: var(--el-text-color-primary); text-align: center; }
-.card .sub { text-align: center; color: var(--el-text-color-secondary); font-size: 12px; margin-top: 8px; }
-.row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dashed var(--el-border-color-lighter); }
-.row:last-child { border-bottom: 0; }
-.row span { color: var(--el-text-color-secondary); }
-.row b { color: var(--el-text-color-primary); }
-.list { border-radius: 10px; }
-.list-row { display: flex; justify-content: space-between; padding: 12px 4px; border-bottom: 1px solid var(--el-border-color-lighter); }
-.list-row:last-child { border-bottom: 0; }
-.list-row span { color: var(--el-text-color-regular); }
-.list-row b { color: var(--el-text-color-primary); }
+.refresh-btn:hover {
+  background: rgba(255, 255, 255, 0.3) !important;
+}
+
+/* Section titles */
+.section-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 20px 4px 10px;
+  font-size: 15px;
+  color: var(--el-text-color-primary);
+  font-weight: 600;
+}
+.section-title .right { font-weight: 400; font-size: 12px; color: var(--el-text-color-secondary); }
+
+/* Stat cards grid */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.stat-card {
+  border-radius: var(--sl-radius-md);
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: #fff;
+}
+.stat-cpu { background: var(--sl-gradient-info); }
+.stat-mem { background: var(--sl-gradient-accent); }
+.stat-net { background: var(--sl-gradient-success); }
+.stat-disk { background: var(--sl-gradient-warning); }
+.stat-label { font-size: 13px; font-weight: 600; opacity: 0.9; }
+.stat-value { font-size: 12px; opacity: 0.85; }
+.stat-rows { width: 100%; margin-top: 4px; }
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  font-size: 13px;
+}
+.stat-row:last-child { border-bottom: 0; }
+.stat-row b { font-weight: 600; }
+
+/* Volumes */
+.volumes { display: flex; flex-direction: column; gap: 10px; }
+.vol-card {
+  background: var(--sl-bg-card);
+  border-radius: var(--sl-radius-md);
+  padding: 14px 18px;
+  box-shadow: var(--sl-shadow-sm);
+}
+.vol-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.vol-name { font-weight: 600; font-size: 14px; color: var(--el-text-color-primary); }
+.vol-pct { font-size: 14px; font-weight: 600; color: var(--sl-primary); }
+.vol-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--el-fill-color);
+  overflow: hidden;
+}
+.vol-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width var(--sl-transition-slow);
+}
+.vol-detail { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 6px; }
+
+/* Info card */
+.info-card {
+  background: var(--sl-bg-card);
+  border-radius: var(--sl-radius-md);
+  padding: 4px 18px;
+  box-shadow: var(--sl-shadow-sm);
+}
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+.info-row:last-child { border-bottom: 0; }
+.info-row span { color: var(--el-text-color-regular); font-size: 14px; }
+.info-row b { color: var(--el-text-color-primary); font-size: 14px; }
+
+/* Actions */
 .actions { margin-top: 24px; }
 </style>

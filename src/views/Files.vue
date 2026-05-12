@@ -409,12 +409,48 @@ onUnmounted(() => {
 
 <style scoped>
 .page { height: 100%; display: flex; flex-direction: column; }
-.header { display: flex; align-items: center; padding: 6px 12px; gap: 6px; }
-.page-title { margin: 0 8px 0 4px; font-size: 20px; color: var(--el-text-color-primary); }
-a { cursor: pointer; color: #409eff; }
-.preview-body { display: flex; justify-content: center; align-items: center; min-height: 50vh; }
+.header {
+  display: flex; align-items: center; padding: 10px 16px; gap: 8px;
+  position: sticky; top: 0; z-index: 10;
+  background: var(--sl-surface);
+  backdrop-filter: blur(var(--sl-surface-blur));
+  -webkit-backdrop-filter: blur(var(--sl-surface-blur));
+  box-shadow: var(--sl-shadow-sm);
+}
+.page-title { margin: 0 8px 0 4px; font-size: 22px; font-weight: 700; color: var(--el-text-color-primary); white-space: nowrap; }
+a { cursor: pointer; color: var(--sl-primary); }
+.preview-body { display: flex; justify-content: center; align-items: center; min-height: 50vh; border-radius: var(--sl-radius-md); overflow: hidden; }
 .preview-media { max-width: 100%; max-height: 70vh; }
-.preview-text { width: 100%; max-height: 70vh; overflow: auto; background: #f5f7fa; padding: 12px; border-radius: 4px; white-space: pre-wrap; word-break: break-all; font-family: Consolas, Monaco, monospace; font-size: 13px; }
-.thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; cursor: pointer; display: block; background: #f5f7fa; }
+.preview-text {
+  width: 100%; max-height: 70vh; overflow: auto;
+  background: var(--el-fill-color); padding: 16px; border-radius: var(--sl-radius-sm);
+  white-space: pre-wrap; word-break: break-all; font-family: Consolas, Monaco, monospace; font-size: 13px;
+}
+.thumb {
+  width: 44px; height: 44px; object-fit: cover; border-radius: 6px; cursor: pointer; display: block;
+  background: var(--el-fill-color); transition: transform var(--sl-transition-fast);
+}
+.thumb:hover { transform: scale(1.1); }
 .thumb-ph { color: #c0c4cc; }
+
+/* Table overrides */
+:deep(.el-table) {
+  border-radius: var(--sl-radius-md);
+  overflow: hidden;
+  --el-table-border-color: transparent;
+}
+:deep(.el-table th.el-table__cell) {
+  background: var(--el-fill-color);
+  font-weight: 600;
+  font-size: 13px;
+}
+:deep(.el-table tr) {
+  transition: background var(--sl-transition-fast);
+}
+:deep(.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell) {
+  background: rgba(0, 0, 0, 0.015);
+}
+:deep(.el-main) {
+  padding: 12px 16px;
+}
 </style>

@@ -303,46 +303,61 @@ watch(() => dsm.baseUrl, () => {
 
 <style scoped>
 .page { padding: 12px 16px 24px; max-width: 1400px; margin: 0 auto; }
-.topbar { display: flex; align-items: center; justify-content: space-between; padding: 6px 0 12px; }
-.title { margin: 0; font-size: 22px; color: var(--el-text-color-primary); }
+.topbar { display: flex; align-items: center; justify-content: space-between; padding: 8px 0 14px; }
+.title { margin: 0; font-size: 24px; font-weight: 700; color: var(--el-text-color-primary); }
 .actions { display: flex; gap: 8px; }
 .folder-bar {
-  display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--el-text-color-secondary);
-  background: var(--el-bg-color); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px;
+  display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--el-text-color-secondary);
+  background: var(--sl-bg-card); border-radius: var(--sl-radius-md); padding: 10px 14px; margin-bottom: 14px;
+  box-shadow: var(--sl-shadow-sm);
 }
 .folder-path { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.count { color: var(--el-color-primary); font-weight: 600; }
+.count { color: var(--sl-primary); font-weight: 600; }
 .body { min-height: 200px; }
 .empty { text-align: center; padding: 80px 0; color: var(--el-text-color-secondary); }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
 .sentinel {
   text-align: center; padding: 16px 0; font-size: 12px; color: var(--el-text-color-secondary);
   min-height: 40px;
 }
 .card {
-  cursor: pointer; background: var(--el-bg-color); border-radius: 10px; overflow: hidden;
-  transition: transform 0.15s, box-shadow 0.15s;
-  border: 1px solid var(--el-border-color-lighter);
+  cursor: pointer; background: var(--sl-bg-card); border-radius: var(--sl-radius-md); overflow: hidden;
+  transition: transform var(--sl-transition-normal), box-shadow var(--sl-transition-normal);
+  box-shadow: var(--sl-shadow-sm);
 }
-.card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,0,0,0.08); }
+.card:hover { transform: translateY(-4px) scale(1.01); box-shadow: var(--sl-shadow-hover); }
+.card:active { transform: scale(0.98); }
 .cover-wrap { position: relative; }
-.cover { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block; background: var(--el-fill-color); }
-.cover.placeholder { display: flex; align-items: center; justify-content: center; color: var(--el-text-color-placeholder); }
+.cover-wrap::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 40%;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.4));
+  pointer-events: none;
+}
 .quality {
-  position: absolute; top: 8px; right: 8px;
-  padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;
-  background: rgba(0,0,0,0.6); color: #fff; backdrop-filter: blur(4px);
+  position: absolute; top: 10px; right: 10px;
+  padding: 3px 10px; border-radius: var(--sl-radius-pill); font-size: 11px; font-weight: 600;
+  background: rgba(0, 0, 0, 0.55); color: #fff; backdrop-filter: blur(6px);
+  z-index: 1;
 }
 .play-mask {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-  color: #fff; opacity: 0; transition: opacity 0.2s; background: rgba(0,0,0,0.3);
+  color: #fff; opacity: 0; transition: opacity var(--sl-transition-normal); background: rgba(0, 0, 0, 0.25);
+  z-index: 1;
 }
 .card:hover .play-mask { opacity: 1; }
-.meta { padding: 10px 12px; }
-.row { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }
-.name { font-size: 14px; color: var(--el-text-color-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.meta { padding: 12px 14px; }
+.row { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+.name {
+  font-size: 14px; color: var(--el-text-color-primary); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; font-weight: 600;
+}
 .size { font-size: 12px; color: var(--el-text-color-secondary); }
-.player-box { display: flex; justify-content: center; align-items: center; background: #000; border-radius: 6px; }
+.player-box { display: flex; justify-content: center; align-items: center; background: #000; border-radius: var(--sl-radius-md); overflow: hidden; }
 .player { width: 100%; max-height: 75vh; background: #000; }
 .player-tip { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 10px; text-align: center; }
 </style>

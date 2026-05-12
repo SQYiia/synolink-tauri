@@ -63,9 +63,11 @@ const tabs = [
         <span>正在恢复会话…</span>
       </div>
       <RouterView v-else v-slot="{ Component }">
-        <keep-alive>
-          <component :is="Component" />
-        </keep-alive>
+        <Transition name="page-fade" mode="out-in">
+          <keep-alive>
+            <component :is="Component" :key="$route.path" />
+          </keep-alive>
+        </Transition>
       </RouterView>
     </main>
     <nav class="tabbar">
@@ -108,29 +110,42 @@ const tabs = [
 }
 .tabbar {
   flex: 0 0 auto;
-  height: 58px;
+  height: 64px;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  border-top: 1px solid var(--el-border-color-lighter);
-  background: var(--el-bg-color);
-  box-shadow: 0 -1px 4px rgba(0, 0, 0, 0.03);
+  background: var(--sl-surface);
+  backdrop-filter: blur(var(--sl-surface-blur));
+  -webkit-backdrop-filter: blur(var(--sl-surface-blur));
+  box-shadow: 0 -1px 12px rgba(0, 0, 0, 0.04);
+  border-top: none;
+  padding: 0 4px;
 }
 .tab {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 3px;
   color: var(--el-text-color-secondary);
   text-decoration: none;
   font-size: 11px;
-  transition: color 0.15s;
+  transition: color var(--sl-transition-normal);
+  position: relative;
 }
 .tab:hover {
-  color: var(--el-color-primary);
+  color: var(--sl-primary);
+}
+.tab .el-icon {
+  padding: 5px 14px;
+  border-radius: var(--sl-radius-pill);
+  transition: background var(--sl-transition-normal), color var(--sl-transition-normal);
 }
 .tab.active {
-  color: var(--el-color-primary);
+  color: var(--sl-primary);
+}
+.tab.active .el-icon {
+  background: var(--el-color-primary-light-9);
+  color: var(--sl-primary);
 }
 .tab.active span {
   font-weight: 600;

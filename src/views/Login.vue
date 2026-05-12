@@ -89,36 +89,81 @@ function back() {
 </script>
 
 <template>
-  <el-container class="page">
-    <el-header>
-      <div class="header">
-        <el-button :icon="'ArrowLeft'" @click="back">返回</el-button>
-        <h2>{{ server?.name || server?.host || '登录' }}</h2>
-        <div style="width: 70px" />
-      </div>
-    </el-header>
-    <el-main>
-      <el-card class="form-card">
-        <div class="url">{{ server?.protocol }}://{{ server?.host }}:{{ server?.port }}</div>
-        <el-form label-width="80px" style="margin-top: 20px;">
+  <div class="page">
+    <div class="login-wrapper">
+      <el-button class="back-btn" @click="back" circle>
+        <el-icon><ArrowLeft /></el-icon>
+      </el-button>
+
+      <div class="login-card">
+        <div class="card-avatar">
+          <el-icon :size="32"><Monitor /></el-icon>
+        </div>
+        <h2 class="card-title">{{ server?.name || server?.host || '登录' }}</h2>
+        <p class="card-url">{{ server?.protocol }}://{{ server?.host }}:{{ server?.port }}</p>
+
+        <el-form label-position="top" style="margin-top: 24px; width: 100%;">
           <el-form-item label="账号">
-            <el-input v-model="form.account" autocomplete="username" placeholder="DSM 账号" />
+            <el-input v-model="form.account" autocomplete="username" placeholder="DSM 账号" size="large" />
           </el-form-item>
           <el-form-item label="密码">
-            <el-input v-model="form.passwd" type="password" show-password autocomplete="current-password" placeholder="DSM 密码" />
+            <el-input v-model="form.passwd" type="password" show-password autocomplete="current-password" placeholder="DSM 密码" size="large" />
           </el-form-item>
-          <el-form-item>
-            <el-button type="primary" :loading="loading" style="width: 100%" @click="submit">登录</el-button>
-          </el-form-item>
+          <el-button type="primary" :loading="loading" size="large" round style="width: 100%; margin-top: 8px;" @click="submit">登录</el-button>
         </el-form>
-      </el-card>
-    </el-main>
-  </el-container>
+      </div>
+    </div>
+  </div>
 </template>
 
 <style scoped>
-.page { height: 100vh; }
-.header { display: flex; align-items: center; justify-content: space-between; height: 60px; }
-.form-card { max-width: 480px; margin: 40px auto; }
-.url { color: #888; font-size: 12px; text-align: center; }
+.page {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--el-bg-color-page);
+  position: relative;
+}
+.back-btn {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+}
+.login-wrapper {
+  width: 100%;
+  max-width: 420px;
+  padding: 0 24px;
+}
+.login-card {
+  background: var(--sl-bg-card);
+  border-radius: var(--sl-radius-lg);
+  box-shadow: var(--sl-shadow-lg);
+  padding: 40px 32px 36px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.card-avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--sl-gradient-primary);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+.card-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+.card-url {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
 </style>

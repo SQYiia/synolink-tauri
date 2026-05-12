@@ -52,43 +52,95 @@ function back() {
 </script>
 
 <template>
-  <el-container class="page">
-    <el-header>
-      <div class="header">
-        <el-button :icon="'ArrowLeft'" @click="back">返回</el-button>
-        <h2>添加服务器</h2>
-        <div style="width: 70px" />
+  <div class="page">
+    <div class="form-wrapper">
+      <el-button class="back-btn" @click="back" circle>
+        <el-icon><ArrowLeft /></el-icon>
+      </el-button>
+
+      <div class="form-card">
+        <div class="card-avatar">
+          <el-icon :size="28"><Plus /></el-icon>
+        </div>
+        <h2 class="card-title">添加服务器</h2>
+        <p class="card-sub">输入群晖 NAS 的连接信息</p>
+
+        <el-form label-position="top" style="margin-top: 24px; width: 100%;">
+          <el-form-item label="备注名称">
+            <el-input v-model="form.name" placeholder="家里的 NAS（选填）" size="large" />
+          </el-form-item>
+          <el-form-item label="协议">
+            <el-radio-group v-model="form.protocol" @change="form.port = form.protocol === 'https' ? 5001 : 5000" size="large">
+              <el-radio-button label="http">HTTP</el-radio-button>
+              <el-radio-button label="https">HTTPS</el-radio-button>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item label="主机 / IP">
+            <el-input v-model="form.host" placeholder="192.168.1.100 或 example.com" size="large" />
+          </el-form-item>
+          <el-form-item label="端口">
+            <el-input-number v-model="form.port" :min="1" :max="65535" size="large" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="备注">
+            <el-input v-model="form.remark" type="textarea" :rows="2" placeholder="可选备注信息" />
+          </el-form-item>
+          <el-button type="primary" :loading="loading" @click="submit" size="large" round style="width: 100%; margin-top: 8px;">保存并测试连接</el-button>
+        </el-form>
       </div>
-    </el-header>
-    <el-main>
-      <el-form label-width="110px" style="max-width: 560px; margin: 0 auto;">
-        <el-form-item label="备注名称">
-          <el-input v-model="form.name" placeholder="家里的 NAS（选填）" />
-        </el-form-item>
-        <el-form-item label="协议">
-          <el-radio-group v-model="form.protocol" @change="form.port = form.protocol === 'https' ? 5001 : 5000">
-            <el-radio-button label="http">HTTP</el-radio-button>
-            <el-radio-button label="https">HTTPS</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item label="主机 / IP">
-          <el-input v-model="form.host" placeholder="192.168.1.100 或 example.com" />
-        </el-form-item>
-        <el-form-item label="端口">
-          <el-input-number v-model="form.port" :min="1" :max="65535" />
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="form.remark" type="textarea" :rows="2" />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" :loading="loading" @click="submit" style="width: 100%">保存并测试连接</el-button>
-        </el-form-item>
-      </el-form>
-    </el-main>
-  </el-container>
+    </div>
+  </div>
 </template>
 
 <style scoped>
-.page { height: 100vh; }
-.header { display: flex; align-items: center; justify-content: space-between; height: 60px; }
+.page {
+  height: 100vh;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 60px;
+  background: var(--el-bg-color-page);
+  position: relative;
+  overflow-y: auto;
+}
+.back-btn {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+}
+.form-wrapper {
+  width: 100%;
+  max-width: 480px;
+  padding: 0 24px 40px;
+}
+.form-card {
+  background: var(--sl-bg-card);
+  border-radius: var(--sl-radius-lg);
+  box-shadow: var(--sl-shadow-lg);
+  padding: 36px 32px 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.card-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--sl-gradient-success);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+.card-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+.card-sub {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
 </style>
