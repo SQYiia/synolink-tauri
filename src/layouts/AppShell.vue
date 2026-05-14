@@ -107,9 +107,35 @@ const tabs = [
 
 <template>
   <div class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-nav">
+        <RouterLink
+          v-for="t in tabs"
+          :key="t.to"
+          :to="t.to"
+          class="nav-item"
+          active-class="active"
+        >
+          <el-icon :size="20">
+            <component :is="t.icon" />
+          </el-icon>
+          <span>{{ t.label }}</span>
+        </RouterLink>
+      </div>
+      <div class="sidebar-bottom">
+        <a class="nav-item" @click="globalSearchOpen = true">
+          <el-icon :size="20"><Search /></el-icon>
+          <span>搜索</span>
+        </a>
+        <a class="nav-item" @click="downloadDrawerOpen = true">
+          <el-icon :size="20"><Download /></el-icon>
+          <span>下载</span>
+        </a>
+      </div>
+    </aside>
     <main class="content">
       <div v-if="booting" class="booting">
-        <el-icon class="is-loading" :size="24"><Loading /></el-icon>
+        <el-icon class="is-loading" :size="20"><Loading /></el-icon>
         <span>正在恢复会话…</span>
       </div>
       <RouterView v-else v-slot="{ Component }">
@@ -120,31 +146,9 @@ const tabs = [
         </Transition>
       </RouterView>
     </main>
-    <nav class="tabbar">
-      <RouterLink
-        v-for="t in tabs"
-        :key="t.to"
-        :to="t.to"
-        class="tab"
-        active-class="active"
-      >
-        <el-icon :size="22">
-          <component :is="t.icon" />
-        </el-icon>
-        <span>{{ t.label }}</span>
-      </RouterLink>
-      <a class="tab" @click="globalSearchOpen = true">
-        <el-icon :size="22"><Search /></el-icon>
-        <span>搜索</span>
-      </a>
-      <a class="tab" @click="downloadDrawerOpen = true">
-        <el-icon :size="22"><Download /></el-icon>
-        <span>下载</span>
-      </a>
-    </nav>
 
     <!-- 全局搜索对话框 -->
-    <el-dialog v-model="globalSearchOpen" title="全局搜索" width="90%" top="5vh" destroy-on-close>
+    <el-dialog v-model="globalSearchOpen" title="全局搜索" width="560px" top="8vh" destroy-on-close>
       <div class="gsearch-bar">
         <el-input
           v-model="globalSearchQuery"
@@ -174,7 +178,7 @@ const tabs = [
     </el-dialog>
 
     <!-- 下载队列 -->
-    <el-drawer v-model="downloadDrawerOpen" title="下载队列" direction="btt" size="45%">
+    <el-drawer v-model="downloadDrawerOpen" title="下载队列" direction="rtl" size="360px">
       <div class="dl-toolbar" v-if="downloadQueue.length">
         <el-button size="small" @click="clearCompleted">清除已完成</el-button>
       </div>
@@ -192,7 +196,7 @@ const tabs = [
           <el-progress
             v-if="t.status === 'downloading' && t.size"
             :percentage="Math.round((t.loaded / t.size) * 100)"
-            :stroke-width="4"
+            :stroke-width="3"
             :show-text="false"
             style="margin-top: 4px"
           />
@@ -209,14 +213,75 @@ const tabs = [
 <style scoped>
 .app-shell {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   height: 100vh;
   background: var(--el-bg-color-page);
 }
+
+/* Sidebar */
+.sidebar {
+  width: 56px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--sl-bg-card);
+  border-right: var(--sl-border);
+  padding: 8px 0;
+}
+.sidebar-nav {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+}
+.sidebar-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+  border-top: var(--sl-border);
+}
+.nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 8px 0;
+  margin: 0 6px;
+  border-radius: var(--sl-radius-sm);
+  color: var(--el-text-color-secondary);
+  text-decoration: none;
+  font-size: 10px;
+  cursor: pointer;
+  transition: background var(--sl-transition-fast), color var(--sl-transition-fast);
+  position: relative;
+}
+.nav-item:hover {
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-primary);
+}
+.nav-item.active {
+  color: var(--sl-primary);
+  background: var(--el-color-primary-light-9);
+}
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--sl-primary);
+}
+
+/* Content */
 .content {
   flex: 1;
   overflow: auto;
-  min-height: 0;
+  min-width: 0;
 }
 .booting {
   display: flex;
@@ -225,70 +290,28 @@ const tabs = [
   gap: 8px;
   height: 100%;
   color: var(--el-text-color-secondary);
-  font-size: 14px;
-}
-.tabbar {
-  flex: 0 0 auto;
-  height: 64px;
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  background: var(--sl-surface);
-  backdrop-filter: blur(var(--sl-surface-blur));
-  -webkit-backdrop-filter: blur(var(--sl-surface-blur));
-  box-shadow: 0 -1px 12px rgba(0, 0, 0, 0.04);
-  border-top: none;
-  padding: 0 4px;
-}
-.tab {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  color: var(--el-text-color-secondary);
-  text-decoration: none;
-  font-size: 11px;
-  transition: color var(--sl-transition-normal);
-  position: relative;
-}
-.tab:hover {
-  color: var(--sl-primary);
-}
-.tab .el-icon {
-  padding: 5px 14px;
-  border-radius: var(--sl-radius-pill);
-  transition: background var(--sl-transition-normal), color var(--sl-transition-normal);
-}
-.tab.active {
-  color: var(--sl-primary);
-}
-.tab.active .el-icon {
-  background: var(--el-color-primary-light-9);
-  color: var(--sl-primary);
-}
-.tab.active span {
-  font-weight: 600;
+  font-size: 13px;
 }
 
 /* Global search */
 .gsearch-bar { display: flex; gap: 8px; margin-bottom: 12px; }
 .gsearch-results { max-height: 60vh; overflow-y: auto; }
 .gsearch-item {
-  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
-  cursor: pointer; border-radius: 6px; transition: background 0.15s;
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  cursor: pointer; border-radius: var(--sl-radius-sm); transition: background var(--sl-transition-fast);
 }
 .gsearch-item:hover { background: var(--el-fill-color-light); }
 .gsearch-info { flex: 1; min-width: 0; }
-.gsearch-name { font-size: 14px; font-weight: 500; color: var(--el-text-color-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.gsearch-path { font-size: 12px; color: var(--el-text-color-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.gsearch-empty { text-align: center; padding: 40px 0; color: var(--el-text-color-secondary); }
+.gsearch-name { font-size: 13px; font-weight: 500; color: var(--el-text-color-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gsearch-path { font-size: 11px; color: var(--el-text-color-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gsearch-empty { text-align: center; padding: 40px 0; color: var(--el-text-color-secondary); font-size: 13px; }
 
 /* Download queue */
 .dl-toolbar { display: flex; justify-content: flex-end; margin-bottom: 8px; }
-.dl-item { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--el-border-color-lighter); }
+.dl-item { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: var(--sl-border); }
 .dl-info { flex: 1; min-width: 0; }
-.dl-name { font-size: 14px; font-weight: 500; color: var(--el-text-color-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dl-meta { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 2px; }
+.dl-name { font-size: 13px; font-weight: 500; color: var(--el-text-color-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dl-meta { font-size: 11px; color: var(--el-text-color-secondary); margin-top: 2px; }
 .dl-error { color: var(--el-color-danger); }
 .dl-actions { flex-shrink: 0; }
 </style>

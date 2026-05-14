@@ -293,36 +293,36 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.page { padding: 12px 16px 24px; max-width: 1400px; margin: 0 auto; }
+.page { padding: 20px 24px 24px; max-width: 1400px; margin: 0 auto; }
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 8px 0 14px;
+  padding: 0 0 16px;
+  border-bottom: var(--sl-border);
+  margin-bottom: 16px;
 }
-.title { margin: 0; font-size: 24px; font-weight: 700; color: var(--el-text-color-primary); }
+.title { margin: 0; font-size: 16px; font-weight: 600; color: var(--el-text-color-primary); }
 .actions { display: flex; gap: 8px; }
 .folder-bar {
-  display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--el-text-color-secondary);
-  background: var(--sl-bg-card); border-radius: var(--sl-radius-md); padding: 10px 14px; margin-bottom: 14px;
-  box-shadow: var(--sl-shadow-sm);
+  display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--el-text-color-secondary);
+  background: var(--sl-bg-card); border-radius: var(--sl-radius-sm); padding: 8px 12px; margin-bottom: 12px;
+  border: var(--sl-border);
 }
 .folder-path { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .count { color: var(--sl-primary); font-weight: 600; }
 .body { min-height: 200px; }
-.empty { text-align: center; padding: 80px 0; color: var(--el-text-color-secondary); }
-.date-group { margin-bottom: 20px; }
+.empty { text-align: center; padding: 48px 0; color: var(--el-text-color-secondary); font-size: 13px; }
+.date-group { margin-bottom: 16px; }
 .date-title {
   display: flex; align-items: center; gap: 6px;
-  margin: 0 0 10px; padding: 8px 12px;
-  font-size: 15px; font-weight: 600; color: var(--el-text-color-primary);
+  margin: 0 0 8px; padding: 6px 0;
+  font-size: 11px; font-weight: 600; color: var(--el-text-color-secondary);
+  text-transform: uppercase; letter-spacing: 0.05em;
   position: sticky; top: 0;
-  background: var(--sl-surface);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-radius: var(--sl-radius-sm);
+  background: var(--el-bg-color-page);
   z-index: 1;
 }
 .date-count {
-  margin-left: 6px; font-size: 12px; color: var(--el-text-color-secondary); font-weight: 400;
+  margin-left: 6px; font-size: 11px; color: var(--el-text-color-placeholder); font-weight: 400;
 }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 4px; }
 .sentinel {
@@ -332,18 +332,18 @@ onBeforeUnmount(() => {
 .cell {
   cursor: pointer; border-radius: var(--sl-radius-sm); overflow: hidden; background: var(--el-fill-color);
   aspect-ratio: 1 / 1;
-  transition: transform var(--sl-transition-fast), box-shadow var(--sl-transition-fast);
+  transition: opacity var(--sl-transition-fast);
 }
-.cell:hover { transform: scale(1.04); box-shadow: var(--sl-shadow-md); z-index: 2; position: relative; }
-.cell:active { transform: scale(0.97); }
-.viewer { position: relative; display: flex; justify-content: center; align-items: center; min-height: 70vh; background: #000; border-radius: var(--sl-radius-md); overflow: hidden; }
+.cell:hover { opacity: 0.85; }
+.cell:active { opacity: 0.7; }
+.viewer { position: relative; display: flex; justify-content: center; align-items: center; min-height: 70vh; background: #000; border-radius: var(--sl-radius-sm); overflow: hidden; }
 .viewer-img { max-width: 100%; max-height: 80vh; object-fit: contain; }
 .viewer-img.placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 300px; height: 300px; background: #222; color: #ccc; }
 .nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(255,255,255,0.15) !important; backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.3) !important; color: #fff !important; }
 .nav:hover { background: rgba(255,255,255,0.25) !important; }
 .nav.left { left: 12px; }
 .nav.right { right: 12px; }
-.viewer-counter { text-align: center; color: var(--el-text-color-secondary); margin-top: 8px; font-size: 13px; }
+.viewer-counter { text-align: center; color: var(--el-text-color-secondary); margin-top: 8px; font-size: 12px; }
 .viewer-info { text-align: center; color: var(--el-text-color-secondary); font-size: 12px; margin-top: 6px; display: flex; justify-content: center; gap: 16px; }
 .viewer-actions { display: flex; justify-content: center; gap: 12px; margin-top: 10px; }
 </style>

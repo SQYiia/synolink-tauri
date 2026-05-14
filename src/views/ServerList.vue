@@ -63,7 +63,7 @@ async function remove(id: string) {
         <h1>SynoLink</h1>
         <p>选择一台服务器开始</p>
       </div>
-      <el-button type="primary" round @click="add">
+      <el-button type="primary" @click="add">
         <el-icon style="margin-right: 4px"><Plus /></el-icon>
         添加服务器
       </el-button>
@@ -72,11 +72,11 @@ async function remove(id: string) {
     <main class="body">
       <div v-if="list.length === 0" class="empty">
         <div class="empty-icon">
-          <el-icon :size="56"><Monitor /></el-icon>
+          <el-icon :size="28"><Monitor /></el-icon>
         </div>
         <p class="empty-title">还没有服务器</p>
         <p class="empty-sub">添加一台群晖 NAS 开始使用</p>
-        <el-button type="primary" round @click="add" style="margin-top: 16px">
+        <el-button type="primary" @click="add" style="margin-top: 12px">
           <el-icon style="margin-right: 4px"><Plus /></el-icon>
           添加服务器
         </el-button>
@@ -93,7 +93,7 @@ async function remove(id: string) {
           <div class="card-remark" v-if="s.remark">{{ s.remark }}</div>
         </div>
         <div class="card-actions">
-          <el-button type="primary" size="small" round @click.stop="pick(s.id)">连接</el-button>
+          <el-button type="primary" size="small" @click.stop="pick(s.id)">连接</el-button>
           <el-button size="small" circle @click.stop="remove(s.id)">
             <el-icon><Delete /></el-icon>
           </el-button>
@@ -105,9 +105,9 @@ async function remove(id: string) {
 
 <style scoped>
 .page {
-  height: 100vh;
-  padding: 0 24px;
-  max-width: 680px;
+  height: 100%;
+  padding: 24px 28px;
+  max-width: 640px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -116,33 +116,34 @@ async function remove(id: string) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 32px 0 24px;
+  padding: 0 0 20px;
+  border-bottom: var(--sl-border);
+  margin-bottom: 20px;
 }
 .hero-text h1 {
   margin: 0;
-  font-size: 28px;
-  font-weight: 700;
+  font-size: 20px;
+  font-weight: 600;
   color: var(--el-text-color-primary);
 }
 .hero-text p {
-  margin: 4px 0 0;
-  font-size: 14px;
+  margin: 2px 0 0;
+  font-size: 13px;
   color: var(--el-text-color-secondary);
 }
 .body {
   flex: 1;
   overflow-y: auto;
-  padding-bottom: 24px;
 }
 .empty {
   text-align: center;
-  padding: 80px 0;
+  padding: 60px 0;
 }
 .empty-icon {
-  width: 96px;
-  height: 96px;
-  margin: 0 auto 16px;
-  border-radius: 50%;
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 12px;
+  border-radius: var(--sl-radius-sm);
   background: var(--el-color-primary-light-9);
   display: flex;
   align-items: center;
@@ -150,41 +151,37 @@ async function remove(id: string) {
   color: var(--sl-primary);
 }
 .empty-title {
-  font-size: 18px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--el-text-color-primary);
   margin: 0;
 }
 .empty-sub {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--el-text-color-secondary);
-  margin: 6px 0 0;
+  margin: 4px 0 0;
 }
 .server-card {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 18px 20px;
+  gap: 12px;
+  padding: 14px 16px;
   background: var(--sl-bg-card);
-  border-radius: var(--sl-radius-md);
-  box-shadow: var(--sl-shadow-sm);
-  margin-bottom: 12px;
+  border-radius: var(--sl-radius-sm);
+  border: var(--sl-border);
+  margin-bottom: 8px;
   cursor: pointer;
-  transition: transform var(--sl-transition-normal), box-shadow var(--sl-transition-normal);
+  transition: border-color var(--sl-transition-fast);
 }
 .server-card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--sl-shadow-md);
-}
-.server-card:active {
-  transform: scale(0.98);
+  border-color: var(--sl-primary);
 }
 .card-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
-  background: var(--sl-gradient-info);
-  color: #fff;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--sl-radius-sm);
+  background: var(--el-color-primary-light-9);
+  color: var(--sl-primary);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -193,30 +190,30 @@ async function remove(id: string) {
 }
 .status-dot {
   position: absolute;
-  bottom: 2px;
-  right: 2px;
-  width: 12px;
-  height: 12px;
+  bottom: -1px;
+  right: -1px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
-  border: 2px solid var(--sl-bg-card, #fff);
+  border: 2px solid var(--sl-bg-card);
   background: #909399;
 }
-.status-dot.online { background: #67c23a; }
-.status-dot.offline { background: #f56c6c; }
+.status-dot.online { background: #10B981; }
+.status-dot.offline { background: #EF4444; }
 .status-dot.unknown { background: #909399; }
 .card-info {
   flex: 1;
   min-width: 0;
 }
 .card-name {
-  font-size: 16px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
   color: var(--el-text-color-primary);
 }
 .card-url {
   font-size: 12px;
   color: var(--el-text-color-secondary);
-  margin-top: 3px;
+  margin-top: 2px;
 }
 .card-remark {
   font-size: 12px;
@@ -225,7 +222,7 @@ async function remove(id: string) {
 }
 .card-actions {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
   flex-shrink: 0;
 }

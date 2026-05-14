@@ -158,67 +158,77 @@ function switchServer() {
 
 <template>
   <div class="page" v-loading="loading">
-    <!-- 顶部个人卡片 - 渐变背景 -->
+    <!-- 顶部个人区 -->
     <div class="profile">
-      <div class="profile-bg"></div>
-      <div class="profile-content">
+      <div class="profile-left">
         <div class="avatar">
-          <el-icon :size="32"><UserFilled /></el-icon>
+          <el-icon :size="20"><UserFilled /></el-icon>
         </div>
         <div class="info">
           <div class="name">{{ app.accounts.find(a => a.id === app.currentAccountId)?.account || '未登录' }}</div>
           <div class="sub">{{ dsm.baseUrl || '—' }}</div>
         </div>
-        <el-button @click="refreshAll" circle class="refresh-btn">
-          <el-icon><Refresh /></el-icon>
-        </el-button>
       </div>
+      <el-button @click="refreshAll" size="small" text>
+        <el-icon><Refresh /></el-icon>
+      </el-button>
     </div>
 
     <!-- 监控区 -->
     <div class="section-title">
-      <span>系统状态</span>
-      <span class="right">更新于 {{ lastUpdate || '—' }}</span>
+      <span>SYSTEM STATUS</span>
+      <span class="right">{{ lastUpdate || '—' }}</span>
     </div>
     <div class="grid">
-      <div class="stat-card stat-cpu">
-        <div class="stat-label">CPU</div>
-        <el-progress type="dashboard" :percentage="cpuPct" :color="'#fff'" :width="90" :stroke-width="6" define-back-color="rgba(255,255,255,0.2)" />
-        <div class="stat-value">{{ cpuPct }}%</div>
-        <svg v-if="cpuHistory.length > 1" class="sparkline" viewBox="0 0 120 30" preserveAspectRatio="none">
-          <path :d="sparklinePath(cpuHistory, 120, 30)" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="1.5" />
-        </svg>
-      </div>
-      <div class="stat-card stat-mem">
-        <div class="stat-label">内存</div>
-        <el-progress type="dashboard" :percentage="memPct" :color="'#fff'" :width="90" :stroke-width="6" define-back-color="rgba(255,255,255,0.2)" />
-        <div class="stat-value">{{ formatBytes(memUsed) }} / {{ formatBytes(memTotal) }}</div>
-        <svg v-if="memHistory.length > 1" class="sparkline" viewBox="0 0 120 30" preserveAspectRatio="none">
-          <path :d="sparklinePath(memHistory, 120, 30)" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="1.5" />
-        </svg>
-      </div>
-      <div class="stat-card stat-net">
-        <div class="stat-label">网络</div>
-        <div class="stat-rows">
-          <div class="stat-row"><span>↑ 上行</span><b>{{ formatSpeed(netSend) }}</b></div>
-          <div class="stat-row"><span>↓ 下行</span><b>{{ formatSpeed(netRecv) }}</b></div>
+      <div class="stat-card">
+        <div class="stat-accent accent-blue"></div>
+        <div class="stat-body">
+          <div class="stat-label">CPU</div>
+          <div class="stat-number">{{ cpuPct }}<span class="stat-unit">%</span></div>
+          <svg v-if="cpuHistory.length > 1" class="sparkline" viewBox="0 0 120 30" preserveAspectRatio="none">
+            <path :d="sparklinePath(cpuHistory, 120, 30)" fill="none" stroke="#3B82F6" stroke-width="1.5" />
+          </svg>
         </div>
-        <svg v-if="netSendHistory.length > 1" class="sparkline" viewBox="0 0 120 30" preserveAspectRatio="none">
-          <path :d="sparklinePath(netSendHistory, 120, 30)" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="1.5" />
-          <path :d="sparklinePath(netRecvHistory, 120, 30)" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="1.5" />
-        </svg>
       </div>
-      <div class="stat-card stat-disk">
-        <div class="stat-label">磁盘</div>
-        <div class="stat-rows">
-          <div class="stat-row"><span>读取</span><b>{{ formatSpeed(diskRead) }}</b></div>
-          <div class="stat-row"><span>写入</span><b>{{ formatSpeed(diskWrite) }}</b></div>
+      <div class="stat-card">
+        <div class="stat-accent accent-indigo"></div>
+        <div class="stat-body">
+          <div class="stat-label">MEMORY</div>
+          <div class="stat-number">{{ memPct }}<span class="stat-unit">%</span></div>
+          <div class="stat-detail">{{ formatBytes(memUsed) }} / {{ formatBytes(memTotal) }}</div>
+          <svg v-if="memHistory.length > 1" class="sparkline" viewBox="0 0 120 30" preserveAspectRatio="none">
+            <path :d="sparklinePath(memHistory, 120, 30)" fill="none" stroke="#6366F1" stroke-width="1.5" />
+          </svg>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-accent accent-green"></div>
+        <div class="stat-body">
+          <div class="stat-label">NETWORK</div>
+          <div class="stat-rows">
+            <div class="stat-row"><span>↑</span><b>{{ formatSpeed(netSend) }}</b></div>
+            <div class="stat-row"><span>↓</span><b>{{ formatSpeed(netRecv) }}</b></div>
+          </div>
+          <svg v-if="netSendHistory.length > 1" class="sparkline" viewBox="0 0 120 30" preserveAspectRatio="none">
+            <path :d="sparklinePath(netSendHistory, 120, 30)" fill="none" stroke="#10B981" stroke-width="1.5" stroke-opacity="0.5" />
+            <path :d="sparklinePath(netRecvHistory, 120, 30)" fill="none" stroke="#10B981" stroke-width="1.5" />
+          </svg>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-accent accent-amber"></div>
+        <div class="stat-body">
+          <div class="stat-label">DISK I/O</div>
+          <div class="stat-rows">
+            <div class="stat-row"><span>Read</span><b>{{ formatSpeed(diskRead) }}</b></div>
+            <div class="stat-row"><span>Write</span><b>{{ formatSpeed(diskWrite) }}</b></div>
+          </div>
         </div>
       </div>
     </div>
 
     <!-- 存储卷 -->
-    <div class="section-title" v-if="volumes.length"><span>存储空间</span></div>
+    <div class="section-title" v-if="volumes.length"><span>STORAGE</span></div>
     <div class="volumes">
       <div v-for="v in volumes" :key="v.id ?? v.volume_path ?? v.fs_type" class="vol-card">
         <div class="vol-head">
@@ -233,7 +243,7 @@ function switchServer() {
     </div>
 
     <!-- 磁盘健康 -->
-    <div class="section-title" v-if="disks.length"><span>磁盘健康</span></div>
+    <div class="section-title" v-if="disks.length"><span>DISK HEALTH</span></div>
     <div class="disks" v-if="disks.length">
       <div v-for="d in disks" :key="d.id ?? d.name" class="disk-card">
         <div class="disk-head">
@@ -251,7 +261,7 @@ function switchServer() {
     </div>
 
     <!-- 账户信息区 -->
-    <div class="section-title"><span>账户信息</span></div>
+    <div class="section-title"><span>ACCOUNT</span></div>
     <div class="info-card">
       <div class="info-row"><span>共享文件夹</span><b>{{ sharesCount }}</b></div>
       <div class="info-row"><span>可用 API</span><b>{{ apisCount }}</b></div>
@@ -260,152 +270,145 @@ function switchServer() {
 
     <!-- 操作区 -->
     <div class="actions">
-      <el-button size="large" round @click="switchServer" style="width: 100%">切换服务器</el-button>
-      <el-button size="large" type="danger" round @click="logout" style="width: 100%; margin-top: 10px">注销登录</el-button>
+      <el-button @click="switchServer" style="width: 100%">切换服务器</el-button>
+      <el-button type="danger" @click="logout" style="width: 100%; margin-top: 8px">注销登录</el-button>
     </div>
   </div>
 </template>
 
 <style scoped>
-.page { padding: 0 16px 24px; max-width: 1200px; margin: 0 auto; }
+.page { padding: 24px 28px; max-width: 960px; margin: 0 auto; }
 
-/* Profile card */
+/* Profile */
 .profile {
-  position: relative;
-  border-radius: var(--sl-radius-lg);
-  overflow: hidden;
-  margin-top: 16px;
-}
-.profile-bg {
-  position: absolute;
-  inset: 0;
-  background: var(--sl-gradient-primary);
-}
-.profile-content {
-  position: relative;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 24px 20px;
-  z-index: 1;
+  justify-content: space-between;
+  padding: 16px 0;
+  border-bottom: var(--sl-border);
+  margin-bottom: 8px;
 }
+.profile-left { display: flex; align-items: center; gap: 12px; }
 .avatar {
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.25);
-  border: 2px solid rgba(255, 255, 255, 0.6);
-  color: #fff;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--sl-radius-sm);
+  background: var(--el-color-primary-light-9);
+  color: var(--sl-primary);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .info { flex: 1; }
-.name { font-size: 18px; font-weight: 700; color: #fff; }
-.sub { color: rgba(255, 255, 255, 0.8); font-size: 12px; margin-top: 4px; }
-.refresh-btn {
-  background: rgba(255, 255, 255, 0.2) !important;
-  border: 1px solid rgba(255, 255, 255, 0.4) !important;
-  color: #fff !important;
-}
-.refresh-btn:hover {
-  background: rgba(255, 255, 255, 0.3) !important;
-}
+.name { font-size: 14px; font-weight: 600; color: var(--el-text-color-primary); }
+.sub { color: var(--el-text-color-secondary); font-size: 12px; margin-top: 2px; }
 
 /* Section titles */
 .section-title {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin: 20px 4px 10px;
-  font-size: 15px;
-  color: var(--el-text-color-primary);
+  margin: 24px 0 12px;
+  font-size: 11px;
   font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--el-text-color-secondary);
+  text-transform: uppercase;
 }
-.section-title .right { font-weight: 400; font-size: 12px; color: var(--el-text-color-secondary); }
+.section-title .right { font-weight: 400; font-size: 11px; letter-spacing: 0; text-transform: none; }
 
 /* Stat cards grid */
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
 .stat-card {
-  border-radius: var(--sl-radius-md);
-  padding: 20px 16px;
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  color: #fff;
+  border-radius: var(--sl-radius-sm);
+  border: var(--sl-border);
+  background: var(--sl-bg-card);
+  overflow: hidden;
 }
-.stat-cpu { background: var(--sl-gradient-info); }
-.stat-mem { background: var(--sl-gradient-accent); }
-.stat-net { background: var(--sl-gradient-success); }
-.stat-disk { background: var(--sl-gradient-warning); }
-.stat-label { font-size: 13px; font-weight: 600; opacity: 0.9; }
-.stat-value { font-size: 12px; opacity: 0.85; }
-.stat-rows { width: 100%; margin-top: 4px; }
+.stat-accent {
+  width: 4px;
+  flex-shrink: 0;
+}
+.accent-blue { background: #3B82F6; }
+.accent-indigo { background: #6366F1; }
+.accent-green { background: #10B981; }
+.accent-amber { background: #F59E0B; }
+.stat-body {
+  flex: 1;
+  padding: 14px 16px;
+  min-width: 0;
+}
+.stat-label { font-size: 11px; font-weight: 600; color: var(--el-text-color-secondary); letter-spacing: 0.03em; text-transform: uppercase; }
+.stat-number { font-size: 28px; font-weight: 700; color: var(--el-text-color-primary); margin-top: 4px; line-height: 1.1; }
+.stat-unit { font-size: 14px; font-weight: 500; margin-left: 2px; color: var(--el-text-color-secondary); }
+.stat-detail { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 4px; }
+.stat-rows { margin-top: 8px; }
 .stat-row {
   display: flex;
   justify-content: space-between;
-  padding: 6px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 4px 0;
   font-size: 13px;
+  color: var(--el-text-color-regular);
 }
-.stat-row:last-child { border-bottom: 0; }
-.stat-row b { font-weight: 600; }
-.sparkline { width: 100%; height: 30px; margin-top: 6px; opacity: 0.9; }
+.stat-row b { font-weight: 600; color: var(--el-text-color-primary); }
+.sparkline { width: 100%; height: 24px; margin-top: 8px; }
 
 /* Volumes */
-.volumes { display: flex; flex-direction: column; gap: 10px; }
+.volumes { display: flex; flex-direction: column; gap: 8px; }
 .vol-card {
   background: var(--sl-bg-card);
-  border-radius: var(--sl-radius-md);
-  padding: 14px 18px;
-  box-shadow: var(--sl-shadow-sm);
+  border-radius: var(--sl-radius-sm);
+  padding: 12px 16px;
+  border: var(--sl-border);
 }
 .vol-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-.vol-name { font-weight: 600; font-size: 14px; color: var(--el-text-color-primary); }
-.vol-pct { font-size: 14px; font-weight: 600; color: var(--sl-primary); }
+.vol-name { font-weight: 500; font-size: 13px; color: var(--el-text-color-primary); }
+.vol-pct { font-size: 13px; font-weight: 600; color: var(--el-text-color-primary); }
 .vol-bar {
-  height: 6px;
-  border-radius: 3px;
+  height: 4px;
+  border-radius: 2px;
   background: var(--el-fill-color);
   overflow: hidden;
 }
 .vol-fill {
   height: 100%;
-  border-radius: 3px;
+  border-radius: 2px;
   transition: width var(--sl-transition-slow);
 }
 .vol-detail { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 6px; }
 
 /* Disks */
-.disks { display: flex; flex-direction: column; gap: 10px; }
+.disks { display: flex; flex-direction: column; gap: 8px; }
 .disk-card {
-  background: var(--sl-bg-card); border-radius: var(--sl-radius-md);
-  padding: 14px 18px; box-shadow: var(--sl-shadow-sm);
+  background: var(--sl-bg-card);
+  border-radius: var(--sl-radius-sm);
+  padding: 12px 16px;
+  border: var(--sl-border);
 }
 .disk-head { display: flex; justify-content: space-between; align-items: center; }
-.disk-name { font-weight: 600; font-size: 14px; color: var(--el-text-color-primary); }
-.disk-status { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: var(--sl-radius-pill); }
-.disk-status.ok { background: #f0f9eb; color: #67c23a; }
-.disk-status.warn { background: #fef0f0; color: #f56c6c; }
+.disk-name { font-weight: 500; font-size: 13px; color: var(--el-text-color-primary); }
+.disk-status { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: var(--sl-radius-sm); }
+.disk-status.ok { background: rgba(16, 185, 129, 0.1); color: #10B981; }
+.disk-status.warn { background: rgba(239, 68, 68, 0.1); color: #EF4444; }
 .disk-detail { display: flex; gap: 12px; margin-top: 6px; font-size: 12px; color: var(--el-text-color-secondary); }
 
 /* Info card */
 .info-card {
   background: var(--sl-bg-card);
-  border-radius: var(--sl-radius-md);
-  padding: 4px 18px;
-  box-shadow: var(--sl-shadow-sm);
+  border-radius: var(--sl-radius-sm);
+  padding: 4px 16px;
+  border: var(--sl-border);
 }
 .info-row {
   display: flex;
   justify-content: space-between;
-  padding: 14px 0;
+  padding: 12px 0;
   border-bottom: 1px solid var(--el-border-color-lighter);
 }
 .info-row:last-child { border-bottom: 0; }
-.info-row span { color: var(--el-text-color-regular); font-size: 14px; }
-.info-row b { color: var(--el-text-color-primary); font-size: 14px; }
+.info-row span { color: var(--el-text-color-regular); font-size: 13px; }
+.info-row b { color: var(--el-text-color-primary); font-size: 13px; }
 
 /* Actions */
 .actions { margin-top: 24px; }

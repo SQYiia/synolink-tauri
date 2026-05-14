@@ -654,37 +654,36 @@ function sortByTime(a: any, b: any) {
 .header {
   display: flex; align-items: center; padding: 10px 16px; gap: 8px;
   position: sticky; top: 0; z-index: 10;
-  background: var(--sl-surface);
-  backdrop-filter: blur(var(--sl-surface-blur));
-  -webkit-backdrop-filter: blur(var(--sl-surface-blur));
-  box-shadow: var(--sl-shadow-sm);
+  background: var(--sl-bg-card);
+  border-bottom: var(--sl-border);
 }
-.page-title { margin: 0 8px 0 4px; font-size: 22px; font-weight: 700; color: var(--el-text-color-primary); white-space: nowrap; }
+.page-title { margin: 0 8px 0 4px; font-size: 16px; font-weight: 600; color: var(--el-text-color-primary); white-space: nowrap; }
 a { cursor: pointer; color: var(--sl-primary); }
-.preview-body { display: flex; justify-content: center; align-items: center; min-height: 50vh; border-radius: var(--sl-radius-md); overflow: hidden; }
+.preview-body { display: flex; justify-content: center; align-items: center; min-height: 50vh; border-radius: var(--sl-radius-sm); overflow: hidden; }
 .preview-media { max-width: 100%; max-height: 70vh; }
 .preview-text {
   width: 100%; max-height: 70vh; overflow: auto;
   background: var(--el-fill-color); padding: 16px; border-radius: var(--sl-radius-sm);
-  white-space: pre-wrap; word-break: break-all; font-family: Consolas, Monaco, monospace; font-size: 13px;
+  white-space: pre-wrap; word-break: break-all; font-family: 'SF Mono', Consolas, Monaco, monospace; font-size: 13px;
 }
 .thumb {
-  width: 44px; height: 44px; object-fit: cover; border-radius: 6px; cursor: pointer; display: block;
-  background: var(--el-fill-color); transition: transform var(--sl-transition-fast);
+  width: 40px; height: 40px; object-fit: cover; border-radius: var(--sl-radius-sm); cursor: pointer; display: block;
+  background: var(--el-fill-color);
 }
-.thumb:hover { transform: scale(1.1); }
 .thumb-ph { color: #c0c4cc; }
 
 /* Table overrides */
 :deep(.el-table) {
-  border-radius: var(--sl-radius-md);
+  border-radius: var(--sl-radius-sm);
   overflow: hidden;
-  --el-table-border-color: transparent;
+  --el-table-border-color: var(--el-border-color-lighter);
 }
 :deep(.el-table th.el-table__cell) {
   background: var(--el-fill-color);
   font-weight: 600;
-  font-size: 13px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 :deep(.el-table tr) {
   transition: background var(--sl-transition-fast);
@@ -699,18 +698,18 @@ a { cursor: pointer; color: var(--sl-primary); }
 .drag-over {
   outline: 2px dashed var(--sl-primary);
   outline-offset: -4px;
-  background: rgba(var(--el-color-primary-rgb, 64, 158, 255), 0.04);
+  background: rgba(99, 102, 241, 0.04);
 }
 .drop-overlay {
   position: absolute; inset: 0; z-index: 100;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
   background: rgba(255,255,255,0.85); backdrop-filter: blur(4px);
-  color: var(--sl-primary); font-size: 16px; font-weight: 600;
+  color: var(--sl-primary); font-size: 14px; font-weight: 500;
   pointer-events: none;
 }
 .batch-bar {
-  display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-bottom: 10px;
-  background: var(--el-color-primary-light-9); border-radius: var(--sl-radius-md);
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-bottom: 8px;
+  background: var(--el-color-primary-light-9); border-radius: var(--sl-radius-sm);
   font-size: 13px; color: var(--el-text-color-primary);
 }
 .favorites-bar {
