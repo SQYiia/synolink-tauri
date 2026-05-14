@@ -12,6 +12,9 @@ const route = useRoute()
 const loading = ref(false)
 const path = ref<string>('')
 const items = ref<any[]>([])
+const sortedItems = computed(() => {
+  return [...items.value].sort(sortByName)
+})
 const crumbs = ref<string[]>([])
 const uploadInput = ref<HTMLInputElement | null>(null)
 
@@ -76,12 +79,22 @@ async function onCopyMoveConfirm(dest: string) {
   loading.value = true
   try {
     const res = await dsm.copyMove(copyMovePaths.value, dest, false, copyMoveMode.value === 'move')
-    if (res.success) {
-      ElMessage.success(copyMoveMode.value === 'move' ? '移动成功' : '复制成功')
-      await loadCurrent()
-    } else {
+    if (!res.success || !res.data?.taskid) {
       ElMessage.error(`操作失败 code=${res.error?.code}`)
+      return
     }
+    // 轮询等待任务完成
+    const taskid = res.data.taskid
+    const MAX_WAIT = 60000
+    const POLL = 1000
+    const t0 = Date.now()
+    while (Date.now() - t0 < MAX_WAIT) {
+      await new Promise((r) => setTimeout(r, POLL))
+      const st = await dsm.copyMoveStatus(taskid)
+      if (st.success && (st.data as any)?.finished) break
+    }
+    ElMessage.success(copyMoveMode.value === 'move' ? '移动成功' : '复制成功')
+    await loadCurrent()
   } finally {
     loading.value = false
   }
@@ -198,7 +211,7 @@ async function loadCurrent() {
 }
 
 async function openFolder(row: any) {
-  const isDir = row.isdir ?? (row.path?.endsWith('/') || !row.additional?.size)
+  const isDir = isRowDir(row)
   if (!isDir) {
     await preview(row)
     return
@@ -411,7 +424,9 @@ watch(previewOpen, (v) => {
 })
 
 function isRowDir(row: any) {
-  return row.isdir ?? !row.additional?.size
+  if (row.isdir !== undefined) return !!row.isdir
+  if (row.additional?.type) return row.additional.type === 'dir'
+  return row.additional?.size === undefined
 }
 
 function isThumbable(row: any): boolean {
@@ -546,7 +561,7 @@ function sortByTime(a: any, b: any) {
         <el-button size="small" type="danger" @click="batchDelete">批量删除</el-button>
       </div>
 
-      <el-table :data="items" stripe @row-dblclick="openFolder" @selection-change="onSelectionChange" style="width: 100%" :default-sort="{ prop: 'name', order: 'ascending' }">
+      <el-table :data="sortedItems" stripe @row-dblclick="openFolder" @selection-change="onSelectionChange" style="width: 100%" :default-sort="{ prop: 'name', order: 'ascending' }">
         <el-table-column type="selection" width="42" />
         <el-table-column width="56">
           <template #default="{ row }">

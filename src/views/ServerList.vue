@@ -28,7 +28,10 @@ async function checkServer(s: ServerConfig) {
   try {
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), 5000)
-    const resp = await fetch(url, { signal: ctrl.signal })
+    const resp = await fetch(url, {
+      signal: ctrl.signal,
+      danger: { acceptInvalidCerts: true, acceptInvalidHostnames: true },
+    } as any)
     clearTimeout(timer)
     status.value[s.id] = resp.ok ? 'online' : 'offline'
   } catch {

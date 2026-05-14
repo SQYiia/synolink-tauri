@@ -97,7 +97,12 @@ function onVideoLoaded() {
   restoreProgress()
 }
 
+let lastSaveTime = 0
+
 function onTimeUpdate() {
+  const now = Date.now()
+  if (now - lastSaveTime < 5000) return
+  lastSaveTime = now
   saveProgress()
 }
 

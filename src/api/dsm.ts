@@ -268,7 +268,7 @@ export class DsmClient {
   /** 复制或移动文件/文件夹（doc 4.9 start） */
   async copyMove(paths: string[], destFolder: string, overwrite = false, removeSource = false) {
     const p = paths.join(',')
-    return this.entry('SYNO.FileStation.CopyMove', 'start', {
+    return this.entry<{ taskid: string }>('SYNO.FileStation.CopyMove', 'start', {
       post: true,
       params: {
         path: p,
@@ -276,6 +276,13 @@ export class DsmClient {
         overwrite: overwrite ? 'true' : 'false',
         remove_src: removeSource ? 'true' : 'false',
       },
+    })
+  }
+
+  /** 轮询复制/移动任务状态 */
+  async copyMoveStatus(taskid: string) {
+    return this.entry<{ finished: boolean; progress?: number }>('SYNO.FileStation.CopyMove', 'status', {
+      params: { taskid },
     })
   }
 

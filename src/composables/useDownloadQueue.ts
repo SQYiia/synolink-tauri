@@ -1,4 +1,5 @@
 import { reactive, computed } from 'vue'
+import { openUrl } from '@tauri-apps/plugin-opener'
 import { dsm } from '../api/dsm'
 
 export interface DownloadTask {
@@ -59,8 +60,25 @@ function processQueue() {
   }
 }
 
+const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024 // 100MB
+
 async function startDownload(task: DownloadTask) {
   task.status = 'downloading'
+
+  // 大文件直接交给系统浏览器下载，避免内存溢出
+  if (task.size > LARGE_FILE_THRESHOLD) {
+    try {
+      await openUrl(dsm.downloadUrl(task.path, 'download'))
+      task.status = 'done'
+      task.loaded = task.size
+    } catch (e: any) {
+      task.status = 'error'
+      task.error = e?.message ?? String(e)
+    }
+    processQueue()
+    return
+  }
+
   task.abortCtrl = new AbortController()
   const url = dsm.downloadUrl(task.path, 'download')
   const headers: Record<string, string> = {}
@@ -93,7 +111,7 @@ async function startDownload(task: DownloadTask) {
     }
 
     // Create blob and trigger download
-    const blob = new Blob(chunks)
+    const blob = new Blob(chunks as BlobPart[])
     const blobUrl = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = blobUrl
