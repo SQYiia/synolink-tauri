@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { openUrl } from '@tauri-apps/plugin-opener'
 import { dsm } from '../api/dsm'
 import { formatBytes } from '../utils/format'
+import { enqueue } from '../composables/useDownloadQueue'
+import FolderPicker from '../components/FolderPicker.vue'
 
 const router = useRouter()
+const route = useRoute()
 const loading = ref(false)
 const path = ref<string>('')
 const items = ref<any[]>([])
@@ -32,12 +34,141 @@ const previewLoading = ref(false)
 
 const canUpload = computed(() => !!path.value && !inSearchMode.value)
 
+// 批量选择
+const selection = ref<any[]>([])
+function onSelectionChange(rows: any[]) { selection.value = rows }
+
+// 拖拽上传
+const dragging = ref(false)
+
+// 收藏夹
+const FAVORITES_KEY = 'files:favorites'
+const favorites = ref<string[]>(loadFavorites())
+
+function loadFavorites(): string[] {
+  try { return JSON.parse(localStorage.getItem(FAVORITES_KEY) || '[]') } catch { return [] }
+}
+function saveFavorites() {
+  localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites.value))
+}
+function toggleFavorite(p: string) {
+  const idx = favorites.value.indexOf(p)
+  if (idx >= 0) favorites.value.splice(idx, 1)
+  else favorites.value.push(p)
+  saveFavorites()
+}
+function isFavorite(p: string) { return favorites.value.includes(p) }
+
+// 复制/移动
+const copyMovePickerOpen = ref(false)
+const copyMoveMode = ref<'copy' | 'move'>('copy')
+const copyMovePaths = ref<string[]>([])
+
+function startCopyMove(mode: 'copy' | 'move', paths: string[]) {
+  copyMoveMode.value = mode
+  copyMovePaths.value = paths
+  copyMovePickerOpen.value = true
+}
+
+async function onCopyMoveConfirm(dest: string) {
+  copyMovePickerOpen.value = false
+  if (!dest || !copyMovePaths.value.length) return
+  loading.value = true
+  try {
+    const res = await dsm.copyMove(copyMovePaths.value, dest, false, copyMoveMode.value === 'move')
+    if (res.success) {
+      ElMessage.success(copyMoveMode.value === 'move' ? '移动成功' : '复制成功')
+      await loadCurrent()
+    } else {
+      ElMessage.error(`操作失败 code=${res.error?.code}`)
+    }
+  } finally {
+    loading.value = false
+  }
+}
+
+// 批量操作
+async function batchDelete() {
+  if (!selection.value.length) return
+  try {
+    await ElMessageBox.confirm(`确定删除选中的 ${selection.value.length} 个项目？该操作不可撤销。`, '批量删除', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+    })
+    loading.value = true
+    const paths = selection.value.map((r) => r.path)
+    const res = await dsm.deletePath(paths)
+    if (res.success) {
+      ElMessage.success(`已删除 ${paths.length} 个项目`)
+      await loadCurrent()
+    } else {
+      ElMessage.error(`删除失败 code=${res.error?.code}`)
+    }
+  } catch {
+  } finally {
+    loading.value = false
+  }
+}
+
+function batchDownload() {
+  if (!selection.value.length) return
+  let count = 0
+  for (const row of selection.value) {
+    if (!isRowDir(row)) {
+      enqueue(row.path, row.name, Number(row.additional?.size || 0))
+      count++
+    }
+  }
+  if (count) ElMessage.success(`已添加 ${count} 个文件到下载队列`)
+}
+
+function batchCopy() {
+  if (!selection.value.length) return
+  startCopyMove('copy', selection.value.map((r) => r.path))
+}
+
+function batchMove() {
+  if (!selection.value.length) return
+  startCopyMove('move', selection.value.map((r) => r.path))
+}
+
+// 拖拽上传处理
+function onDragOver(e: DragEvent) {
+  e.preventDefault()
+  if (canUpload.value) dragging.value = true
+}
+function onDragLeave() { dragging.value = false }
+async function onDrop(e: DragEvent) {
+  e.preventDefault()
+  dragging.value = false
+  if (!canUpload.value) return
+  const files = e.dataTransfer?.files
+  if (!files || !files.length) return
+  loading.value = true
+  try {
+    for (const f of Array.from(files)) {
+      const res = await dsm.upload(path.value, f)
+      if (res.success) ElMessage.success(`${f.name} 上传完成`)
+      else ElMessage.error(`${f.name} 上传失败 code=${res.error?.code}`)
+    }
+    await loadCurrent()
+  } finally {
+    loading.value = false
+  }
+}
+
 onMounted(async () => {
   if (!dsm.sid) {
     router.replace('/servers')
     return
   }
-  await loadShares()
+  const openPath = route.query.open as string | undefined
+  if (openPath) {
+    await openFolder({ path: openPath, isdir: true })
+  } else {
+    await loadShares()
+  }
 })
 
 async function loadShares() {
@@ -151,14 +282,9 @@ async function doDelete(row: any) {
   }
 }
 
-async function doDownload(row: any) {
-  const url = dsm.downloadUrl(row.path, 'download')
-  try {
-    await openUrl(url)
-    ElMessage.success('已交由系统浏览器下载')
-  } catch (e: any) {
-    ElMessage.error('打开下载链接失败：' + (e?.message ?? e))
-  }
+function doDownload(row: any) {
+  enqueue(row.path, row.name, Number(row.additional?.size || 0))
+  ElMessage.success(`已添加「${row.name}」到下载队列`)
 }
 
 function triggerUpload() {
@@ -248,6 +374,15 @@ async function preview(row: any) {
     previewOpen.value = true
     return
   }
+  // 大文件保护：文本 > 5MB、图片 > 20MB 时提示
+  const fileSize = Number(row.additional?.size ?? 0)
+  const TEXT_LIMIT = 5 * 1024 * 1024
+  const IMAGE_LIMIT = 20 * 1024 * 1024
+  const limit = previewType.value === 'text' ? TEXT_LIMIT : IMAGE_LIMIT
+  if (fileSize > limit) {
+    ElMessage.warning(`文件过大（${formatBytes(fileSize)}），请直接下载查看`)
+    return
+  }
   previewOpen.value = true
   previewLoading.value = true
   try {
@@ -325,6 +460,27 @@ watch(items, (rows) => {
 onUnmounted(() => {
   revokeThumbs()
 })
+
+function sortByName(a: any, b: any) {
+  const aDir = isRowDir(a) ? 0 : 1
+  const bDir = isRowDir(b) ? 0 : 1
+  if (aDir !== bDir) return aDir - bDir
+  return (a.name ?? '').localeCompare(b.name ?? '', 'zh-CN')
+}
+
+function sortBySize(a: any, b: any) {
+  const aDir = isRowDir(a) ? 0 : 1
+  const bDir = isRowDir(b) ? 0 : 1
+  if (aDir !== bDir) return aDir - bDir
+  return (Number(a.additional?.size) || 0) - (Number(b.additional?.size) || 0)
+}
+
+function sortByTime(a: any, b: any) {
+  const aDir = isRowDir(a) ? 0 : 1
+  const bDir = isRowDir(b) ? 0 : 1
+  if (aDir !== bDir) return aDir - bDir
+  return (Number(a.additional?.time?.mtime) || 0) - (Number(b.additional?.time?.mtime) || 0)
+}
 </script>
 
 <template>
@@ -336,6 +492,9 @@ onUnmounted(() => {
           <el-breadcrumb-item><a @click="loadShares">共享文件夹</a></el-breadcrumb-item>
           <el-breadcrumb-item v-for="(c, i) in crumbs" :key="c"><a @click="crumbJump(i)">{{ c }}</a></el-breadcrumb-item>
         </el-breadcrumb>
+        <el-button v-if="path" :type="isFavorite(path) ? 'warning' : undefined" circle size="small" @click="toggleFavorite(path)" title="收藏当前目录">
+          <el-icon><Star /></el-icon>
+        </el-button>
         <el-input
           v-model="searchPattern"
           placeholder="搜索（当前目录递归）"
@@ -350,8 +509,45 @@ onUnmounted(() => {
         <input ref="uploadInput" type="file" multiple style="display:none" @change="onUploadPicked" />
       </div>
     </el-header>
-    <el-main v-loading="loading">
-      <el-table :data="items" stripe @row-dblclick="openFolder" style="width: 100%">
+
+    <!-- 收藏栏 -->
+    <div class="favorites-bar" v-if="favorites.length">
+      <el-icon :size="14"><Star /></el-icon>
+      <el-tag
+        v-for="f in favorites"
+        :key="f"
+        size="small"
+        closable
+        @click="openFolder({ path: f, isdir: true })"
+        @close="toggleFavorite(f)"
+        class="fav-tag"
+      >{{ f.split('/').pop() || f }}</el-tag>
+    </div>
+
+    <el-main
+      v-loading="loading"
+      @dragover="onDragOver"
+      @dragleave="onDragLeave"
+      @drop="onDrop"
+      :class="{ 'drag-over': dragging }"
+    >
+      <!-- 拖拽上传提示 -->
+      <div v-if="dragging" class="drop-overlay">
+        <el-icon :size="48"><Upload /></el-icon>
+        <span>松开以上传文件</span>
+      </div>
+
+      <!-- 批量操作栏 -->
+      <div v-if="selection.length" class="batch-bar">
+        <span>已选 {{ selection.length }} 项</span>
+        <el-button size="small" @click="batchDownload">批量下载</el-button>
+        <el-button size="small" @click="batchCopy">复制到…</el-button>
+        <el-button size="small" @click="batchMove">移动到…</el-button>
+        <el-button size="small" type="danger" @click="batchDelete">批量删除</el-button>
+      </div>
+
+      <el-table :data="items" stripe @row-dblclick="openFolder" @selection-change="onSelectionChange" style="width: 100%" :default-sort="{ prop: 'name', order: 'ascending' }">
+        <el-table-column type="selection" width="42" />
         <el-table-column width="56">
           <template #default="{ row }">
             <el-icon v-if="isRowDir(row)" :size="28"><Folder /></el-icon>
@@ -365,19 +561,21 @@ onUnmounted(() => {
             <el-icon v-else :size="28"><Document /></el-icon>
           </template>
         </el-table-column>
-        <el-table-column prop="name" label="名称" />
-        <el-table-column label="大小" width="110">
+        <el-table-column prop="name" label="名称" sortable :sort-method="sortByName" />
+        <el-table-column label="大小" width="110" sortable :sort-method="sortBySize">
           <template #default="{ row }">{{ isRowDir(row) ? '—' : formatBytes(row.additional?.size) }}</template>
         </el-table-column>
-        <el-table-column label="修改时间" width="170">
+        <el-table-column label="修改时间" width="170" sortable :sort-method="sortByTime">
           <template #default="{ row }">
             <span v-if="row.additional?.time?.mtime">{{ new Date(row.additional.time.mtime * 1000).toLocaleString() }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="280" fixed="right">
+        <el-table-column label="操作" width="360" fixed="right">
           <template #default="{ row }">
             <el-button v-if="!isRowDir(row)" size="small" @click="preview(row)">预览</el-button>
             <el-button v-if="!isRowDir(row)" size="small" @click="doDownload(row)">下载</el-button>
+            <el-button size="small" @click="startCopyMove('copy', [row.path])">复制</el-button>
+            <el-button size="small" @click="startCopyMove('move', [row.path])">移动</el-button>
             <el-button size="small" @click="doRename(row)">重命名</el-button>
             <el-button size="small" type="danger" @click="doDelete(row)">删除</el-button>
           </template>
@@ -399,6 +597,13 @@ onUnmounted(() => {
         <pre v-else-if="previewType === 'text'" class="preview-text">{{ previewText }}</pre>
       </div>
     </el-dialog>
+
+    <FolderPicker
+      v-model="copyMovePickerOpen"
+      :initial="path"
+      :title="copyMoveMode === 'copy' ? '复制到…' : '移动到…'"
+      @confirm="onCopyMoveConfirm"
+    />
   </el-container>
 </template>
 
@@ -447,5 +652,29 @@ a { cursor: pointer; color: var(--sl-primary); }
 }
 :deep(.el-main) {
   padding: 12px 16px;
+  position: relative;
 }
+.drag-over {
+  outline: 2px dashed var(--sl-primary);
+  outline-offset: -4px;
+  background: rgba(var(--el-color-primary-rgb, 64, 158, 255), 0.04);
+}
+.drop-overlay {
+  position: absolute; inset: 0; z-index: 100;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  background: rgba(255,255,255,0.85); backdrop-filter: blur(4px);
+  color: var(--sl-primary); font-size: 16px; font-weight: 600;
+  pointer-events: none;
+}
+.batch-bar {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-bottom: 10px;
+  background: var(--el-color-primary-light-9); border-radius: var(--sl-radius-md);
+  font-size: 13px; color: var(--el-text-color-primary);
+}
+.favorites-bar {
+  display: flex; align-items: center; gap: 6px; padding: 6px 16px;
+  overflow-x: auto; flex-shrink: 0;
+  font-size: 12px; color: var(--el-text-color-secondary);
+}
+.fav-tag { cursor: pointer; }
 </style>

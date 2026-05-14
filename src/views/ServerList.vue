@@ -1,13 +1,40 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import { useAppStore } from '../stores/app'
+import type { ServerConfig } from '../stores/app'
 
 const router = useRouter()
 const app = useAppStore()
 
-onMounted(() => app.load())
+// 连通性状态: 'unknown' | 'online' | 'offline'
+const status = ref<Record<string, 'unknown' | 'online' | 'offline'>>({})
+
+onMounted(async () => {
+  await app.load()
+  checkAll()
+})
+
+async function checkAll() {
+  for (const s of app.servers) {
+    status.value[s.id] = 'unknown'
+    checkServer(s)
+  }
+}
+
+async function checkServer(s: ServerConfig) {
+  const url = `${s.protocol}://${s.host}:${s.port}/webapi/query.cgi?api=SYNO.API.Info&version=1&method=query`
+  try {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 5000)
+    const resp = await fetch(url, { signal: ctrl.signal })
+    clearTimeout(timer)
+    status.value[s.id] = resp.ok ? 'online' : 'offline'
+  } catch {
+    status.value[s.id] = 'offline'
+  }
+}
 
 const list = computed(() => app.servers)
 
@@ -54,6 +81,7 @@ async function remove(id: string) {
       <div v-for="s in list" :key="s.id" class="server-card" @click="pick(s.id)">
         <div class="card-icon">
           <el-icon :size="24"><Monitor /></el-icon>
+          <span class="status-dot" :class="status[s.id] || 'unknown'" />
         </div>
         <div class="card-info">
           <div class="card-name">{{ s.name || s.host }}</div>
@@ -157,7 +185,21 @@ async function remove(id: string) {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  position: relative;
 }
+.status-dot {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--sl-bg-card, #fff);
+  background: #909399;
+}
+.status-dot.online { background: #67c23a; }
+.status-dot.offline { background: #f56c6c; }
+.status-dot.unknown { background: #909399; }
 .card-info {
   flex: 1;
   min-width: 0;

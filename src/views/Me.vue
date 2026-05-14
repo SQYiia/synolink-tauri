@@ -18,9 +18,33 @@ const netRecv = ref(0)
 const diskRead = ref(0)
 const diskWrite = ref(0)
 const volumes = ref<any[]>([])
+const disks = ref<any[]>([])
 const sharesCount = ref(0)
 const apisCount = ref(0)
 const lastUpdate = ref('')
+
+// 历史趋势数据（最近60个采样点 = 5分钟 @5s间隔）
+const HISTORY_MAX = 60
+const cpuHistory = ref<number[]>([])
+const memHistory = ref<number[]>([])
+const netSendHistory = ref<number[]>([])
+const netRecvHistory = ref<number[]>([])
+
+function pushHistory(arr: number[], val: number) {
+  arr.push(val)
+  if (arr.length > HISTORY_MAX) arr.shift()
+}
+
+function sparklinePath(data: number[], width: number, height: number): string {
+  if (data.length < 2) return ''
+  const max = Math.max(...data, 1)
+  const step = width / (data.length - 1)
+  return data.map((v, i) => {
+    const x = i * step
+    const y = height - (v / max) * height
+    return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+}
 
 let timer: any = null
 
@@ -42,7 +66,7 @@ onUnmounted(() => {
 async function refreshAll() {
   loading.value = true
   try {
-    await Promise.all([refreshUtil(), refreshStorage(), refreshShares()])
+    await Promise.all([refreshUtil(), refreshStorage(), refreshDisks(), refreshShares()])
   } finally {
     loading.value = false
   }
@@ -71,6 +95,11 @@ async function refreshUtil() {
       diskRead.value = Number(total2.read_byte ?? 0)
       diskWrite.value = Number(total2.write_byte ?? 0)
       lastUpdate.value = new Date().toLocaleTimeString()
+
+      pushHistory(cpuHistory.value, cpuPct.value)
+      pushHistory(memHistory.value, memPct.value)
+      pushHistory(netSendHistory.value, netSend.value)
+      pushHistory(netRecvHistory.value, netRecv.value)
     }
   } catch (e) { console.warn('[Me] refreshUtil failed:', e) }
 }
@@ -82,6 +111,16 @@ async function refreshStorage() {
       volumes.value = ((res.data as any).volumes ?? []) as any[]
     }
   } catch (e) { console.warn('[Me] refreshStorage failed:', e) }
+}
+
+async function refreshDisks() {
+  try {
+    const res = await dsm.diskInfo()
+    if (res.success && res.data) {
+      disks.value = ((res.data as any).disks ?? (res.data as any)) as any[]
+      if (!Array.isArray(disks.value)) disks.value = []
+    }
+  } catch (e) { console.warn('[Me] refreshDisks failed:', e) }
 }
 
 async function refreshShares() {
@@ -146,11 +185,17 @@ function switchServer() {
         <div class="stat-label">CPU</div>
         <el-progress type="dashboard" :percentage="cpuPct" :color="'#fff'" :width="90" :stroke-width="6" define-back-color="rgba(255,255,255,0.2)" />
         <div class="stat-value">{{ cpuPct }}%</div>
+        <svg v-if="cpuHistory.length > 1" class="sparkline" viewBox="0 0 120 30" preserveAspectRatio="none">
+          <path :d="sparklinePath(cpuHistory, 120, 30)" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="1.5" />
+        </svg>
       </div>
       <div class="stat-card stat-mem">
         <div class="stat-label">内存</div>
         <el-progress type="dashboard" :percentage="memPct" :color="'#fff'" :width="90" :stroke-width="6" define-back-color="rgba(255,255,255,0.2)" />
         <div class="stat-value">{{ formatBytes(memUsed) }} / {{ formatBytes(memTotal) }}</div>
+        <svg v-if="memHistory.length > 1" class="sparkline" viewBox="0 0 120 30" preserveAspectRatio="none">
+          <path :d="sparklinePath(memHistory, 120, 30)" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="1.5" />
+        </svg>
       </div>
       <div class="stat-card stat-net">
         <div class="stat-label">网络</div>
@@ -158,6 +203,10 @@ function switchServer() {
           <div class="stat-row"><span>↑ 上行</span><b>{{ formatSpeed(netSend) }}</b></div>
           <div class="stat-row"><span>↓ 下行</span><b>{{ formatSpeed(netRecv) }}</b></div>
         </div>
+        <svg v-if="netSendHistory.length > 1" class="sparkline" viewBox="0 0 120 30" preserveAspectRatio="none">
+          <path :d="sparklinePath(netSendHistory, 120, 30)" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="1.5" />
+          <path :d="sparklinePath(netRecvHistory, 120, 30)" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="1.5" />
+        </svg>
       </div>
       <div class="stat-card stat-disk">
         <div class="stat-label">磁盘</div>
@@ -180,6 +229,24 @@ function switchServer() {
           <div class="vol-fill" :style="{ width: volPct(v) + '%', background: pctColor(volPct(v)) }"></div>
         </div>
         <div class="vol-detail">{{ formatBytes(Number(v.used ?? 0)) }} / {{ formatBytes(Number(v.size ?? v.total ?? 0)) }}</div>
+      </div>
+    </div>
+
+    <!-- 磁盘健康 -->
+    <div class="section-title" v-if="disks.length"><span>磁盘健康</span></div>
+    <div class="disks" v-if="disks.length">
+      <div v-for="d in disks" :key="d.id ?? d.name" class="disk-card">
+        <div class="disk-head">
+          <span class="disk-name">{{ d.name || d.id }}</span>
+          <span class="disk-status" :class="(d.status ?? d.smart_status ?? '').toLowerCase() === 'normal' ? 'ok' : 'warn'">
+            {{ d.status ?? d.smart_status ?? '未知' }}
+          </span>
+        </div>
+        <div class="disk-detail">
+          <span v-if="d.model">{{ d.model }}</span>
+          <span v-if="d.temp">{{ d.temp }}°C</span>
+          <span v-if="d.size_total">{{ formatBytes(Number(d.size_total)) }}</span>
+        </div>
       </div>
     </div>
 
@@ -284,6 +351,7 @@ function switchServer() {
 }
 .stat-row:last-child { border-bottom: 0; }
 .stat-row b { font-weight: 600; }
+.sparkline { width: 100%; height: 30px; margin-top: 6px; opacity: 0.9; }
 
 /* Volumes */
 .volumes { display: flex; flex-direction: column; gap: 10px; }
@@ -308,6 +376,19 @@ function switchServer() {
   transition: width var(--sl-transition-slow);
 }
 .vol-detail { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 6px; }
+
+/* Disks */
+.disks { display: flex; flex-direction: column; gap: 10px; }
+.disk-card {
+  background: var(--sl-bg-card); border-radius: var(--sl-radius-md);
+  padding: 14px 18px; box-shadow: var(--sl-shadow-sm);
+}
+.disk-head { display: flex; justify-content: space-between; align-items: center; }
+.disk-name { font-weight: 600; font-size: 14px; color: var(--el-text-color-primary); }
+.disk-status { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: var(--sl-radius-pill); }
+.disk-status.ok { background: #f0f9eb; color: #67c23a; }
+.disk-status.warn { background: #fef0f0; color: #f56c6c; }
+.disk-detail { display: flex; gap: 12px; margin-top: 6px; font-size: 12px; color: var(--el-text-color-secondary); }
 
 /* Info card */
 .info-card {

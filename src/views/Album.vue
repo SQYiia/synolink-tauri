@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { openUrl } from '@tauri-apps/plugin-opener'
 import { dsm } from '../api/dsm'
+import { formatBytes } from '../utils/format'
 import { useMediaScan } from '../composables/useMediaScan'
 import FolderPicker from '../components/FolderPicker.vue'
 import LazyThumb from '../components/LazyThumb.vue'
@@ -34,8 +37,6 @@ onMounted(() => {
   if (hasFolder) scan()
   setupSentinel()
 })
-
-onBeforeUnmount(() => { cleanup() })
 
 watch(() => dsm.baseUrl, () => { onBaseUrlChange() })
 
@@ -117,6 +118,59 @@ function openPhoto(p: any) {
 }
 function prev() { if (viewerIndex.value > 0) viewerIndex.value-- }
 function next() { if (viewerIndex.value < flatPhotos.value.length - 1) viewerIndex.value++ }
+
+function onViewerKey(e: KeyboardEvent) {
+  if (e.key === 'ArrowLeft') prev()
+  else if (e.key === 'ArrowRight') next()
+  else if (e.key === 'Escape') viewerOpen.value = false
+}
+
+async function viewerDownload() {
+  const p = flatPhotos.value[viewerIndex.value]
+  if (!p) return
+  try {
+    await openUrl(dsm.downloadUrl(p.path, 'download'))
+    ElMessage.success('已交由系统浏览器下载')
+  } catch (e: any) {
+    ElMessage.error('下载失败：' + (e?.message ?? e))
+  }
+}
+
+async function viewerDelete() {
+  const p = flatPhotos.value[viewerIndex.value]
+  if (!p) return
+  try {
+    await ElMessageBox.confirm(`确定删除「${p.name}」？`, '删除', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+    })
+    const res = await dsm.deletePath(p.path)
+    if (res.success) {
+      ElMessage.success('已删除')
+      photos.value = photos.value.filter((x: any) => x.path !== p.path)
+      if (viewerIndex.value >= flatPhotos.value.length) {
+        viewerIndex.value = Math.max(0, flatPhotos.value.length - 1)
+      }
+      if (!flatPhotos.value.length) viewerOpen.value = false
+    } else {
+      ElMessage.error(`删除失败 code=${res.error?.code}`)
+    }
+  } catch {}
+}
+
+watch(viewerOpen, (open) => {
+  if (open) {
+    window.addEventListener('keydown', onViewerKey)
+  } else {
+    window.removeEventListener('keydown', onViewerKey)
+  }
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onViewerKey)
+  cleanup()
+})
 </script>
 
 <template>
@@ -216,6 +270,22 @@ function next() { if (viewerIndex.value < flatPhotos.value.length - 1) viewerInd
         </el-button>
       </div>
       <div class="viewer-counter">{{ viewerIndex + 1 }} / {{ flatPhotos.length }}</div>
+      <div class="viewer-info" v-if="flatPhotos[viewerIndex]">
+        <span v-if="flatPhotos[viewerIndex].additional?.size">
+          {{ formatBytes(flatPhotos[viewerIndex].additional.size) }}
+        </span>
+        <span v-if="photoTime(flatPhotos[viewerIndex])">
+          {{ new Date(photoTime(flatPhotos[viewerIndex]) * 1000).toLocaleString() }}
+        </span>
+      </div>
+      <div class="viewer-actions">
+        <el-button type="primary" @click="viewerDownload">
+          <el-icon style="margin-right:4px"><Download /></el-icon>下载
+        </el-button>
+        <el-button type="danger" @click="viewerDelete">
+          <el-icon style="margin-right:4px"><Delete /></el-icon>删除
+        </el-button>
+      </div>
     </el-dialog>
 
     <FolderPicker v-model="pickerOpen" :initial="folder" title="选择相册目录" @confirm="onPickFolder" />
@@ -274,4 +344,6 @@ function next() { if (viewerIndex.value < flatPhotos.value.length - 1) viewerInd
 .nav.left { left: 12px; }
 .nav.right { right: 12px; }
 .viewer-counter { text-align: center; color: var(--el-text-color-secondary); margin-top: 8px; font-size: 13px; }
+.viewer-info { text-align: center; color: var(--el-text-color-secondary); font-size: 12px; margin-top: 6px; display: flex; justify-content: center; gap: 16px; }
+.viewer-actions { display: flex; justify-content: center; gap: 12px; margin-top: 10px; }
 </style>

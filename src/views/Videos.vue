@@ -31,7 +31,79 @@ const {
 const playerOpen = ref(false)
 const playingSrc = ref('')
 const playingName = ref('')
+const playingPath = ref('')
 const pickerOpen = ref(false)
+const videoEl = ref<HTMLVideoElement | null>(null)
+
+const PROGRESS_KEY = 'video:progress'
+const DURATION_KEY = 'video:duration'
+
+const durations = ref<Record<string, number>>(loadDurations())
+
+function loadProgress(): Record<string, number> {
+  try { return JSON.parse(localStorage.getItem(PROGRESS_KEY) || '{}') } catch { return {} }
+}
+
+function loadDurations(): Record<string, number> {
+  try { return JSON.parse(localStorage.getItem(DURATION_KEY) || '{}') } catch { return {} }
+}
+
+function saveDuration(path: string, dur: number) {
+  if (!path || !dur || !isFinite(dur)) return
+  durations.value[path] = dur
+  localStorage.setItem(DURATION_KEY, JSON.stringify(durations.value))
+}
+
+function saveProgress() {
+  const el = videoEl.value
+  if (!el || !playingPath.value) return
+  // Only save if played past 5s and not near end (last 10s)
+  if (el.currentTime > 5 && el.duration - el.currentTime > 10) {
+    const map = loadProgress()
+    map[playingPath.value] = el.currentTime
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify(map))
+  }
+}
+
+function restoreProgress() {
+  const el = videoEl.value
+  if (!el || !playingPath.value) return
+  const map = loadProgress()
+  const t = map[playingPath.value]
+  if (t && t > 5) {
+    el.currentTime = t
+    ElMessage.info(`已恢复到上次播放位置 ${formatTime(t)}`)
+  }
+}
+
+function clearProgress(path: string) {
+  const map = loadProgress()
+  delete map[path]
+  localStorage.setItem(PROGRESS_KEY, JSON.stringify(map))
+}
+
+function formatTime(s: number): string {
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = Math.floor(s % 60)
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`
+}
+
+function onVideoLoaded() {
+  const el = videoEl.value
+  if (el && playingPath.value && el.duration) {
+    saveDuration(playingPath.value, el.duration)
+  }
+  restoreProgress()
+}
+
+function onTimeUpdate() {
+  saveProgress()
+}
+
+function onVideoEnded() {
+  if (playingPath.value) clearProgress(playingPath.value)
+}
 
 onMounted(() => {
   const hasFolder = initFromStorage()
@@ -49,14 +121,17 @@ function coverOf(v: any) {
 
 function play(v: any) {
   playingName.value = v.name
+  playingPath.value = v.path
   playingSrc.value = dsm.mediaUrl('stream', v.path)
   playerOpen.value = true
 }
 
 watch(playerOpen, (open) => {
   if (!open) {
+    saveProgress()
     playingSrc.value = ''
     playingName.value = ''
+    playingPath.value = ''
   }
 })
 
@@ -124,6 +199,7 @@ async function openExternal(v: any, e: Event) {
               </template>
             </LazyThumb>
             <div class="quality">{{ qualityTag(v) }}</div>
+            <div class="duration" v-if="durations[v.path]">{{ formatTime(durations[v.path]) }}</div>
             <div class="play-mask">
               <el-icon :size="48"><VideoPlay /></el-icon>
             </div>
@@ -160,11 +236,15 @@ async function openExternal(v: any, e: Event) {
       <div class="player-box">
         <video
           v-if="playingSrc"
+          ref="videoEl"
           :src="playingSrc"
           class="player"
           controls
           autoplay
           preload="metadata"
+          @loadedmetadata="onVideoLoaded"
+          @timeupdate="onTimeUpdate"
+          @ended="onVideoEnded"
         />
       </div>
       <div class="player-tip">
@@ -217,6 +297,12 @@ async function openExternal(v: any, e: Event) {
   position: absolute; top: 10px; right: 10px;
   padding: 3px 10px; border-radius: var(--sl-radius-pill); font-size: 11px; font-weight: 600;
   background: rgba(0, 0, 0, 0.55); color: #fff; backdrop-filter: blur(6px);
+  z-index: 1;
+}
+.duration {
+  position: absolute; bottom: 10px; right: 10px;
+  padding: 2px 8px; border-radius: var(--sl-radius-pill); font-size: 11px; font-weight: 600;
+  background: rgba(0, 0, 0, 0.65); color: #fff; backdrop-filter: blur(6px);
   z-index: 1;
 }
 .play-mask {

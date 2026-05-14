@@ -265,6 +265,20 @@ export class DsmClient {
     })
   }
 
+  /** 复制或移动文件/文件夹（doc 4.9 start） */
+  async copyMove(paths: string[], destFolder: string, overwrite = false, removeSource = false) {
+    const p = paths.join(',')
+    return this.entry('SYNO.FileStation.CopyMove', 'start', {
+      post: true,
+      params: {
+        path: p,
+        dest_folder_path: destFolder,
+        overwrite: overwrite ? 'true' : 'false',
+        remove_src: removeSource ? 'true' : 'false',
+      },
+    })
+  }
+
   /** 搜索：启动任务（doc 4.15 start）
    *  注意：pattern 留空表示搜索所有文件；传 `*` 会被 DSM 当作不合法正则立即返回空。 */
   async searchStart(
@@ -410,6 +424,12 @@ export class DsmClient {
   async storageInfo() {
     return this.entry('SYNO.Core.Storage.Volume', 'list', {
       params: { limit: -1, offset: 0, location: 'internal', option: 'none' },
+    })
+  }
+
+  async diskInfo() {
+    return this.entry('SYNO.Core.Storage.Disk', 'list', {
+      params: { limit: -1, offset: 0 },
     })
   }
 
