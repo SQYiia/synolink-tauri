@@ -65,8 +65,8 @@ const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024 // 100MB
 async function startDownload(task: DownloadTask) {
   task.status = 'downloading'
 
-  // 大文件直接交给系统浏览器下载，避免内存溢出
-  if (task.size > LARGE_FILE_THRESHOLD) {
+  // 大文件或未知大小直接交给系统浏览器下载，避免内存溢出
+  if (!task.size || task.size > LARGE_FILE_THRESHOLD) {
     try {
       await openUrl(dsm.downloadUrl(task.path, 'download'))
       task.status = 'done'

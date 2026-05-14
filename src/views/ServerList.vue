@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
+import { fetch } from '@tauri-apps/plugin-http'
 import { useAppStore } from '../stores/app'
 import type { ServerConfig } from '../stores/app'
 

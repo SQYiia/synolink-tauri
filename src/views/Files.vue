@@ -12,9 +12,27 @@ const route = useRoute()
 const loading = ref(false)
 const path = ref<string>('')
 const items = ref<any[]>([])
+const sortKey = ref<'name' | 'size' | 'time'>('name')
+const sortOrder = ref<'ascending' | 'descending'>('ascending')
+
 const sortedItems = computed(() => {
-  return [...items.value].sort(sortByName)
+  const arr = [...items.value]
+  const fns: Record<string, (a: any, b: any) => number> = { name: sortByName, size: sortBySize, time: sortByTime }
+  const fn = fns[sortKey.value] ?? sortByName
+  arr.sort(fn)
+  if (sortOrder.value === 'descending') arr.reverse()
+  return arr
 })
+
+function onSortChange({ prop, order }: { prop: string; order: string | null }) {
+  if (!order) {
+    sortKey.value = 'name'
+    sortOrder.value = 'ascending'
+  } else {
+    sortKey.value = (prop === 'size' ? 'size' : prop === 'time' ? 'time' : 'name') as any
+    sortOrder.value = order as any
+  }
+}
 const crumbs = ref<string[]>([])
 const uploadInput = ref<HTMLInputElement | null>(null)
 
@@ -88,10 +106,19 @@ async function onCopyMoveConfirm(dest: string) {
     const MAX_WAIT = 60000
     const POLL = 1000
     const t0 = Date.now()
+    let finished = false
     while (Date.now() - t0 < MAX_WAIT) {
       await new Promise((r) => setTimeout(r, POLL))
       const st = await dsm.copyMoveStatus(taskid)
-      if (st.success && (st.data as any)?.finished) break
+      if (!st.success) break
+      const data = st.data as any
+      if (data?.finished) { finished = true; break }
+      if (data?.error) break
+    }
+    if (!finished) {
+      ElMessage.warning('操作超时或失败，请手动确认')
+      await loadCurrent()
+      return
     }
     ElMessage.success(copyMoveMode.value === 'move' ? '移动成功' : '复制成功')
     await loadCurrent()
@@ -561,7 +588,7 @@ function sortByTime(a: any, b: any) {
         <el-button size="small" type="danger" @click="batchDelete">批量删除</el-button>
       </div>
 
-      <el-table :data="sortedItems" stripe @row-dblclick="openFolder" @selection-change="onSelectionChange" style="width: 100%" :default-sort="{ prop: 'name', order: 'ascending' }">
+      <el-table :data="sortedItems" stripe @row-dblclick="openFolder" @selection-change="onSelectionChange" @sort-change="onSortChange" style="width: 100%">
         <el-table-column type="selection" width="42" />
         <el-table-column width="56">
           <template #default="{ row }">
@@ -576,11 +603,11 @@ function sortByTime(a: any, b: any) {
             <el-icon v-else :size="28"><Document /></el-icon>
           </template>
         </el-table-column>
-        <el-table-column prop="name" label="名称" sortable :sort-method="sortByName" />
-        <el-table-column label="大小" width="110" sortable :sort-method="sortBySize">
+        <el-table-column prop="name" label="名称" sortable="custom" />
+        <el-table-column prop="size" label="大小" width="110" sortable="custom">
           <template #default="{ row }">{{ isRowDir(row) ? '—' : formatBytes(row.additional?.size) }}</template>
         </el-table-column>
-        <el-table-column label="修改时间" width="170" sortable :sort-method="sortByTime">
+        <el-table-column prop="time" label="修改时间" width="170" sortable="custom">
           <template #default="{ row }">
             <span v-if="row.additional?.time?.mtime">{{ new Date(row.additional.time.mtime * 1000).toLocaleString() }}</span>
           </template>
