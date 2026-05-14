@@ -84,7 +84,7 @@ function back() {
           <el-form-item label="备注">
             <el-input v-model="form.remark" type="textarea" :rows="2" placeholder="可选备注信息" />
           </el-form-item>
-          <el-button type="primary" :loading="loading" @click="submit" size="large" round style="width: 100%; margin-top: 8px;">保存并测试连接</el-button>
+          <el-button type="primary" :loading="loading" @click="submit" size="large" style="width: 100%; margin-top: 8px;">保存并测试连接</el-button>
         </el-form>
       </div>
     </div>
@@ -109,24 +109,24 @@ function back() {
 }
 .form-wrapper {
   width: 100%;
-  max-width: 480px;
+  max-width: 460px;
   padding: 0 24px 40px;
 }
 .form-card {
   background: var(--sl-bg-card);
-  border-radius: var(--sl-radius-lg);
-  box-shadow: var(--sl-shadow-lg);
-  padding: 36px 32px 32px;
+  border-radius: var(--sl-radius-md);
+  border: var(--sl-border);
+  padding: 32px 28px 28px;
   display: flex;
   flex-direction: column;
   align-items: center;
 }
 .card-avatar {
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  background: var(--sl-gradient-success);
-  color: #fff;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--sl-radius-sm);
+  background: var(--el-color-primary-light-9);
+  color: var(--sl-primary);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -134,13 +134,13 @@ function back() {
 }
 .card-title {
   margin: 0;
-  font-size: 20px;
-  font-weight: 700;
+  font-size: 18px;
+  font-weight: 600;
   color: var(--el-text-color-primary);
 }
 .card-sub {
   margin: 4px 0 0;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--el-text-color-secondary);
 }
 </style>

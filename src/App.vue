@@ -51,8 +51,6 @@ onUnmounted(() => {
   --sl-accent-red: #EF4444;
 
   /* Surfaces */
-  --sl-surface: rgba(255, 255, 255, 0.95);
-  --sl-surface-blur: 12px;
   --sl-bg-page: #F8F9FC;
   --sl-bg-card: #FFFFFF;
 
@@ -67,7 +65,6 @@ onUnmounted(() => {
   --sl-radius-pill: 100px;
 
   /* Shadows (only for elevated elements: modals, dropdowns) */
-  --sl-shadow-sm: none;
   --sl-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
   --sl-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
 
@@ -92,7 +89,6 @@ onUnmounted(() => {
 html.dark {
   --sl-bg-page: #0F0F14;
   --sl-bg-card: #1A1A24;
-  --sl-surface: rgba(26, 26, 36, 0.95);
   --sl-border: 1px solid rgba(255, 255, 255, 0.08);
   --sl-border-hover: 1px solid rgba(255, 255, 255, 0.15);
   --sl-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);

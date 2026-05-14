@@ -117,7 +117,7 @@ function back() {
           <el-form-item label="密码">
             <el-input v-model="form.passwd" type="password" show-password autocomplete="current-password" placeholder="DSM 密码" size="large" />
           </el-form-item>
-          <el-button type="primary" :loading="loading" size="large" round style="width: 100%; margin-top: 8px;" @click="submit">登录</el-button>
+          <el-button type="primary" :loading="loading" size="large" style="width: 100%; margin-top: 8px;" @click="submit">登录</el-button>
         </el-form>
       </div>
     </div>
@@ -140,38 +140,38 @@ function back() {
 }
 .login-wrapper {
   width: 100%;
-  max-width: 420px;
+  max-width: 400px;
   padding: 0 24px;
 }
 .login-card {
   background: var(--sl-bg-card);
-  border-radius: var(--sl-radius-lg);
-  box-shadow: var(--sl-shadow-lg);
-  padding: 40px 32px 36px;
+  border-radius: var(--sl-radius-md);
+  border: var(--sl-border);
+  padding: 36px 28px 32px;
   display: flex;
   flex-direction: column;
   align-items: center;
 }
 .card-avatar {
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  background: var(--sl-gradient-primary);
-  color: #fff;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--sl-radius-sm);
+  background: var(--el-color-primary-light-9);
+  color: var(--sl-primary);
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 .card-title {
   margin: 0;
-  font-size: 22px;
-  font-weight: 700;
+  font-size: 18px;
+  font-weight: 600;
   color: var(--el-text-color-primary);
 }
 .card-url {
-  margin: 6px 0 0;
-  font-size: 13px;
+  margin: 4px 0 0;
+  font-size: 12px;
   color: var(--el-text-color-secondary);
 }
 </style>
