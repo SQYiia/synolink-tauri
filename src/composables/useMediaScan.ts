@@ -29,7 +29,7 @@ export function useMediaScan(opts: UseMediaScanOptions) {
   let sentinelObserver: IntersectionObserver | null = null
   let scanGen = 0
 
-  const STORAGE_KEY = computed(() => `${storageKeyPrefix}:${dsm.baseUrl}`)
+  function storageKey() { return `${storageKeyPrefix}:${dsm.baseUrl}` }
 
   function initFromStorage() {
     if (!dsm.sid) {
@@ -37,7 +37,7 @@ export function useMediaScan(opts: UseMediaScanOptions) {
       return false
     }
     try {
-      const saved = localStorage.getItem(STORAGE_KEY.value)
+      const saved = localStorage.getItem(storageKey())
       if (saved) {
         folder.value = saved
         return true
@@ -87,6 +87,7 @@ export function useMediaScan(opts: UseMediaScanOptions) {
       const collected: any[] = []
       let offset = 0
       const PAGE = 500
+      const MAX_FILES = 3000
       const MAX_ITER = 400
       let finished = false
       let idleRounds = 0
@@ -109,6 +110,7 @@ export function useMediaScan(opts: UseMediaScanOptions) {
           collected.push(...filtered)
           offset += batch.length
           items.value = collected.slice()
+          if (collected.length >= MAX_FILES) { finished = true; break }
           idleRounds = 0
           await new Promise<void>((r) => requestAnimationFrame(() => r()))
         } else {
@@ -122,7 +124,8 @@ export function useMediaScan(opts: UseMediaScanOptions) {
         }
       }
 
-      ElMessage.success(`扫描完成：${items.value.length} 个文件`)
+      const truncated = collected.length >= MAX_FILES
+      ElMessage.success(truncated ? `已加载前 ${items.value.length} 个文件（目录文件过多）` : `扫描完成：${items.value.length} 个文件`)
     } catch (e: any) {
       ElMessage.error('扫描出错: ' + (e?.message ?? e))
     } finally {
@@ -133,18 +136,8 @@ export function useMediaScan(opts: UseMediaScanOptions) {
 
   function onPickFolder(p: string) {
     folder.value = p
-    try { localStorage.setItem(STORAGE_KEY.value, p) } catch {}
+    try { localStorage.setItem(storageKey(), p) } catch {}
     scan()
-  }
-
-  function onBaseUrlChange() {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY.value)
-      folder.value = saved ?? ''
-      items.value = []
-      visibleCount.value = visibleInit
-      if (saved) scan()
-    } catch {}
   }
 
   const visibleItems = computed(() => items.value.slice(0, visibleCount.value))
@@ -158,7 +151,6 @@ export function useMediaScan(opts: UseMediaScanOptions) {
     sentinel,
     scan,
     onPickFolder,
-    onBaseUrlChange,
     initFromStorage,
     setupSentinel,
     cleanup,

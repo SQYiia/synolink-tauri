@@ -505,6 +505,15 @@ onUnmounted(() => {
   revokeThumbs()
 })
 
+function handleCommand(cmd: string, row: any) {
+  switch (cmd) {
+    case 'rename': doRename(row); break
+    case 'copy': startCopyMove('copy', [row.path]); break
+    case 'move': startCopyMove('move', [row.path]); break
+    case 'delete': doDelete(row); break
+  }
+}
+
 function sortByName(a: any, b: any) {
   return (a.name ?? '').localeCompare(b.name ?? '', 'zh-CN')
 }
@@ -605,14 +614,37 @@ function sortByTime(a: any, b: any) {
             <span v-if="row.additional?.time?.mtime">{{ new Date(row.additional.time.mtime * 1000).toLocaleString() }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="360" fixed="right">
+        <el-table-column label="操作" width="180" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="!isRowDir(row)" size="small" @click="preview(row)">预览</el-button>
-            <el-button v-if="!isRowDir(row)" size="small" @click="doDownload(row)">下载</el-button>
-            <el-button size="small" @click="startCopyMove('copy', [row.path])">复制</el-button>
-            <el-button size="small" @click="startCopyMove('move', [row.path])">移动</el-button>
-            <el-button size="small" @click="doRename(row)">重命名</el-button>
-            <el-button size="small" type="danger" @click="doDelete(row)">删除</el-button>
+            <div class="ops-cell">
+              <el-button v-if="!isRowDir(row)" size="small" type="primary" link @click="doDownload(row)">
+                <el-icon><Download /></el-icon>
+              </el-button>
+              <el-button v-if="!isRowDir(row)" size="small" link @click="preview(row)">
+                <el-icon><View /></el-icon>
+              </el-button>
+              <el-dropdown trigger="click" @command="(cmd: string) => handleCommand(cmd, row)">
+                <el-button size="small" link>
+                  <el-icon><MoreFilled /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="rename">
+                      <el-icon><Edit /></el-icon>重命名
+                    </el-dropdown-item>
+                    <el-dropdown-item command="copy">
+                      <el-icon><CopyDocument /></el-icon>复制到…
+                    </el-dropdown-item>
+                    <el-dropdown-item command="move">
+                      <el-icon><Rank /></el-icon>移动到…
+                    </el-dropdown-item>
+                    <el-dropdown-item command="delete" divided>
+                      <el-icon><Delete /></el-icon><span style="color:var(--el-color-danger)">删除</span>
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -711,4 +743,5 @@ a { cursor: pointer; color: var(--sl-primary); }
   font-size: 12px; color: var(--el-text-color-secondary);
 }
 .fav-tag { cursor: pointer; }
+.ops-cell { display: flex; align-items: center; gap: 4px; }
 </style>

@@ -133,9 +133,15 @@ async function refreshShares() {
   } catch (e) { console.warn('[Me] refreshShares failed:', e) }
 }
 
+function volUsed(v: any): number {
+  return Number(v.size_used_in_byte ?? v.used_size ?? v.used ?? 0)
+}
+function volTotal(v: any): number {
+  return Number(v.size_total_in_byte ?? v.total_size ?? v.size ?? v.total ?? 0)
+}
 function volPct(v: any) {
-  const used = Number(v.used ?? 0)
-  const size = Number(v.size ?? v.total ?? 0)
+  const used = volUsed(v)
+  const size = volTotal(v)
   return size ? Math.round((used / size) * 100) : 0
 }
 function pctColor(p: number) {
@@ -238,7 +244,7 @@ function switchServer() {
         <div class="vol-bar">
           <div class="vol-fill" :style="{ width: volPct(v) + '%', background: pctColor(volPct(v)) }"></div>
         </div>
-        <div class="vol-detail">{{ formatBytes(Number(v.used ?? 0)) }} / {{ formatBytes(Number(v.size ?? v.total ?? 0)) }}</div>
+        <div class="vol-detail">{{ formatBytes(volUsed(v)) }} / {{ formatBytes(volTotal(v)) }}</div>
       </div>
     </div>
 

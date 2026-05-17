@@ -19,7 +19,7 @@ function isVideo(f: any): boolean {
 
 const {
   folder, loading, items: videos, visibleCount, visibleItems: visibleVideos, sentinel,
-  scan, onPickFolder, onBaseUrlChange, initFromStorage, setupSentinel, cleanup,
+  scan, onPickFolder, initFromStorage, setupSentinel, cleanup,
 } = useMediaScan({
   extensions: 'mp4,webm,mov,mkv,avi,ts,m4v,mpg,mpeg,wmv,flv,3gp',
   filterFn: isVideo,
@@ -118,7 +118,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => { cleanup() })
 
-watch(() => dsm.baseUrl, () => { onBaseUrlChange() })
 
 function coverOf(v: any) {
   return dsm.mediaUrl('thumb', v.path, { size: 'small' })
