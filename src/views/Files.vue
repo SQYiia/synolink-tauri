@@ -16,12 +16,14 @@ const sortKey = ref<'name' | 'size' | 'time'>('name')
 const sortOrder = ref<'ascending' | 'descending'>('ascending')
 
 const sortedItems = computed(() => {
-  const arr = [...items.value]
+  const dirs = items.value.filter(isRowDir)
+  const files = items.value.filter(i => !isRowDir(i))
   const fns: Record<string, (a: any, b: any) => number> = { name: sortByName, size: sortBySize, time: sortByTime }
   const fn = fns[sortKey.value] ?? sortByName
-  arr.sort(fn)
-  if (sortOrder.value === 'descending') arr.reverse()
-  return arr
+  dirs.sort(fn)
+  files.sort(fn)
+  if (sortOrder.value === 'descending') { dirs.reverse(); files.reverse() }
+  return [...dirs, ...files]
 })
 
 function onSortChange({ prop, order }: { prop: string; order: string | null }) {
@@ -504,23 +506,14 @@ onUnmounted(() => {
 })
 
 function sortByName(a: any, b: any) {
-  const aDir = isRowDir(a) ? 0 : 1
-  const bDir = isRowDir(b) ? 0 : 1
-  if (aDir !== bDir) return aDir - bDir
   return (a.name ?? '').localeCompare(b.name ?? '', 'zh-CN')
 }
 
 function sortBySize(a: any, b: any) {
-  const aDir = isRowDir(a) ? 0 : 1
-  const bDir = isRowDir(b) ? 0 : 1
-  if (aDir !== bDir) return aDir - bDir
   return (Number(a.additional?.size) || 0) - (Number(b.additional?.size) || 0)
 }
 
 function sortByTime(a: any, b: any) {
-  const aDir = isRowDir(a) ? 0 : 1
-  const bDir = isRowDir(b) ? 0 : 1
-  if (aDir !== bDir) return aDir - bDir
   return (Number(a.additional?.time?.mtime) || 0) - (Number(b.additional?.time?.mtime) || 0)
 }
 </script>
