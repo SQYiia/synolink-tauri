@@ -1,8 +1,12 @@
 use std::collections::HashMap;
-use std::sync::RwLock;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
+use futures_util::StreamExt;
+use serde::Serialize;
 use tauri::http::Response;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
+use tokio::io::AsyncWriteExt;
 
 #[derive(Default, Clone)]
 struct Session {
@@ -14,6 +18,8 @@ struct Session {
 struct AppState {
     session: RwLock<Session>,
     http: reqwest::Client,
+    /// taskId -> cancel flag，下载任务并发取消控制
+    cancels: RwLock<HashMap<String, Arc<AtomicBool>>>,
 }
 
 impl Default for AppState {
@@ -28,6 +34,7 @@ impl Default for AppState {
         Self {
             session: RwLock::new(Session::default()),
             http,
+            cancels: RwLock::new(HashMap::new()),
         }
     }
 }
@@ -49,6 +56,279 @@ fn set_session(
 fn clear_session(state: tauri::State<'_, AppState>) {
     let mut s = state.session.write().unwrap();
     *s = Session::default();
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProgressPayload {
+    task_id: String,
+    loaded: u64,
+    total: u64,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DonePayload {
+    task_id: String,
+    save_path: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ErrorPayload {
+    task_id: String,
+    error: String,
+}
+
+/// 过滤 Windows 不合法的文件名字符
+fn safe_filename(name: &str) -> String {
+    let bad = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
+    let mut s: String = name
+        .chars()
+        .map(|c| if bad.contains(&c) || (c as u32) < 32 { '_' } else { c })
+        .collect();
+    if s.is_empty() {
+        s = "download".to_string();
+    }
+    s
+}
+
+/// 重名避免冲突：name.ext -> name (1).ext / name (2).ext ...
+fn unique_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+    let target = dir.join(name);
+    if !target.exists() {
+        return target;
+    }
+    let (stem, ext) = match name.rfind('.') {
+        Some(i) if i > 0 => (&name[..i], &name[i..]),
+        _ => (name, ""),
+    };
+    for i in 1..1000 {
+        let candidate = dir.join(format!("{} ({}){}", stem, i, ext));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    dir.join(format!("{}-{}{}", stem, std::process::id(), ext))
+}
+
+/// 下载文件到本地 Downloads 目录。支持 Range 断点续传（.synodownload 临时文件），
+/// 进度通过 "download:progress" 事件推送，完成/错误/取消各自发布独立事件。
+#[tauri::command]
+async fn download_to_file(
+    app: tauri::AppHandle,
+    task_id: String,
+    path: String,
+    name: String,
+) -> Result<(), String> {
+    // 拿 session 与 cancel flag
+    let (session, cancel_flag) = {
+        let state = app.state::<AppState>();
+        let session = state.session.read().unwrap().clone();
+        let flag = Arc::new(AtomicBool::new(false));
+        state
+            .cancels
+            .write()
+            .unwrap()
+            .insert(task_id.clone(), flag.clone());
+        (session, flag)
+    };
+
+    if session.base_url.is_empty() {
+        return Err("session not set".into());
+    }
+
+    // 计算保存路径：Downloads 目录 + .synodownload 临时文件
+    let dl_dir = app
+        .path()
+        .download_dir()
+        .map_err(|e| format!("download_dir: {}", e))?;
+    if !dl_dir.exists() {
+        std::fs::create_dir_all(&dl_dir).map_err(|e| format!("create dir: {}", e))?;
+    }
+    let final_name = safe_filename(&name);
+    let part_path = dl_dir.join(format!("{}.synodownload", final_name));
+
+    // 如果已有 part 文件 → 从它实现断点续传
+    let resume_from: u64 = match std::fs::metadata(&part_path) {
+        Ok(m) => m.len(),
+        Err(_) => 0,
+    };
+
+    // 拼 URL：复用 stream 逻辑的参数格式（entry.cgi + mode=open + path 裸字符串编码 + _sid）
+    let url = format!(
+        "{}/webapi/entry.cgi?api=SYNO.FileStation.Download&version=2&method=download&mode=open&path={}&_sid={}",
+        session.base_url,
+        encode_path(&path),
+        session.sid,
+    );
+
+    let http = {
+        let state = app.state::<AppState>();
+        state.http.clone()
+    };
+
+    let mut req = http.get(&url);
+    if !session.syno_token.is_empty() {
+        req = req.header("X-SYNO-TOKEN", &session.syno_token);
+    }
+    if resume_from > 0 {
+        req = req.header("Range", format!("bytes={}-", resume_from));
+    }
+
+    let resp = req.send().await.map_err(|e| e.to_string())?;
+    let status = resp.status();
+    let supports_resume = status.as_u16() == 206;
+    if !status.is_success() {
+        let _ = app.emit(
+            "download:error",
+            ErrorPayload {
+                task_id: task_id.clone(),
+                error: format!("HTTP {}", status),
+            },
+        );
+        cleanup_cancel(&app, &task_id);
+        return Err(format!("HTTP {}", status));
+    }
+
+    // 总字节数：206 则从 Content-Range 取 total；200 则从 Content-Length
+    let total: u64 = if supports_resume {
+        resp.headers()
+            .get("content-range")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.split('/').nth(1))
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(0)
+    } else {
+        resp.content_length().unwrap_or(0)
+    };
+
+    // 打开 part 文件：206 追加写；200 覆写（服务器不支持续传时丢弃已有部分）
+    let mut file = if supports_resume && resume_from > 0 {
+        tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(&part_path)
+            .await
+            .map_err(|e| format!("open part(append): {}", e))?
+    } else {
+        tokio::fs::File::create(&part_path)
+            .await
+            .map_err(|e| format!("create part: {}", e))?
+    };
+    let mut loaded: u64 = if supports_resume { resume_from } else { 0 };
+
+    // 进度 emit 限频：至少间隔 200ms 或累计 256KB 才推一次
+    let mut last_emit = Instant::now();
+    let mut last_loaded = loaded;
+    const EMIT_BYTES: u64 = 256 * 1024;
+    const EMIT_MS: u128 = 200;
+
+    let _ = app.emit(
+        "download:progress",
+        ProgressPayload {
+            task_id: task_id.clone(),
+            loaded,
+            total,
+        },
+    );
+
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        if cancel_flag.load(Ordering::Relaxed) {
+            // 取消：flush 后保留 part 文件供下次续传
+            let _ = file.flush().await;
+            let _ = app.emit(
+                "download:cancelled",
+                ProgressPayload {
+                    task_id: task_id.clone(),
+                    loaded,
+                    total,
+                },
+            );
+            cleanup_cancel(&app, &task_id);
+            return Ok(());
+        }
+        let bytes = chunk.map_err(|e| {
+            let msg = e.to_string();
+            let _ = app.emit(
+                "download:error",
+                ErrorPayload {
+                    task_id: task_id.clone(),
+                    error: msg.clone(),
+                },
+            );
+            msg
+        })?;
+        file.write_all(&bytes)
+            .await
+            .map_err(|e| format!("write: {}", e))?;
+        loaded += bytes.len() as u64;
+
+        let now = Instant::now();
+        if loaded - last_loaded >= EMIT_BYTES || now.duration_since(last_emit).as_millis() >= EMIT_MS
+        {
+            let _ = app.emit(
+                "download:progress",
+                ProgressPayload {
+                    task_id: task_id.clone(),
+                    loaded,
+                    total,
+                },
+            );
+            last_emit = now;
+            last_loaded = loaded;
+        }
+    }
+
+    file.flush().await.map_err(|e| format!("flush: {}", e))?;
+    drop(file);
+
+    // 完成：.synodownload 重命名为最终名（同名则递增序号）
+    let final_path = unique_path(&dl_dir, &final_name);
+    tokio::fs::rename(&part_path, &final_path)
+        .await
+        .map_err(|e| format!("rename: {}", e))?;
+
+    let _ = app.emit(
+        "download:progress",
+        ProgressPayload {
+            task_id: task_id.clone(),
+            loaded,
+            total: if total > 0 { total } else { loaded },
+        },
+    );
+    let _ = app.emit(
+        "download:done",
+        DonePayload {
+            task_id: task_id.clone(),
+            save_path: final_path.to_string_lossy().to_string(),
+        },
+    );
+    cleanup_cancel(&app, &task_id);
+    Ok(())
+}
+
+/// 取消一个进行中的下载任务（不会删 .synodownload文件，便于后续续传）
+#[tauri::command]
+fn cancel_download(state: tauri::State<'_, AppState>, task_id: String) {
+    if let Some(flag) = state.cancels.read().unwrap().get(&task_id) {
+        flag.store(true, Ordering::Relaxed);
+    }
+}
+
+/// 返回默认下载目录（系统 Downloads）的完整路径字符串
+#[tauri::command]
+fn get_default_download_dir(app: tauri::AppHandle) -> Result<String, String> {
+    let dir = app
+        .path()
+        .download_dir()
+        .map_err(|e| format!("download_dir: {}", e))?;
+    Ok(dir.to_string_lossy().to_string())
+}
+
+fn cleanup_cancel(app: &tauri::AppHandle, task_id: &str) {
+    let state = app.state::<AppState>();
+    state.cancels.write().unwrap().remove(task_id);
 }
 
 fn encode_path(p: &str) -> String {
@@ -249,7 +529,13 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .register_asynchronous_uri_scheme_protocol("dsm", dsm_protocol)
-        .invoke_handler(tauri::generate_handler![set_session, clear_session])
+        .invoke_handler(tauri::generate_handler![
+            set_session,
+            clear_session,
+            download_to_file,
+            cancel_download,
+            get_default_download_dir
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

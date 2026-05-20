@@ -3560,6 +3560,7 @@ dependencies = [
 name = "synolink-tauri"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
  "percent-encoding",
  "reqwest 0.12.28",
  "serde",
@@ -3569,6 +3570,7 @@ dependencies = [
  "tauri-plugin-http",
  "tauri-plugin-opener",
  "tauri-plugin-store",
+ "tokio",
  "url",
 ]
 

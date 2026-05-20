@@ -86,6 +86,9 @@ export class DsmClient {
     const url = this.buildUrl(path, query)
     const headers: Record<string, string> = { ...(opts.headers ?? {}) }
     if (this.synoToken) headers['X-SYNO-TOKEN'] = this.synoToken
+    // 注：不注入 Cookie: id=<sid>。
+    // webapi 登录拿到的 sid 与 DSM Web GUI 登录的 cookie id 是两套独立会话，值不同；
+    // 贸然把 webapi sid 当作 cookie id 注入，DSM 拿它去校验 GUI session 表会失败 → 119。
 
     let body: string | undefined
     if (form) {
@@ -168,7 +171,11 @@ export class DsmClient {
     return this.request<DsmResponse<T>>('/webapi/entry.cgi', { query: full })
   }
 
-  /** 明文登录（doc 3.1 method=login） */
+  /** 明文登录（doc 3.1 method=login）
+   *  注意：必须使用 session='FileStation' 登录！
+   *  SYNO.FileStation.* 系列 API（尤其是 Download）对 session 类型校验严格，
+   *  使用 'webui' 或其他 session 名会导致 Download 接口返回错误码 119（即使参数、cookie、URL 全部正确）。
+   *  SYNO.Core.* 系列在 FileStation session 下同样可用（File Station 应用内部本就调这些）。 */
   async login(params: {
     account: string
     passwd: string
@@ -179,7 +186,7 @@ export class DsmClient {
     const res = await this.entry<AuthResult>('SYNO.API.Auth', 'login', {
       post: true,
       params: {
-        session: 'webui',
+        session: 'FileStation',
         format: 'sid',
         enable_syno_token: 'yes',
         enable_device_token: params.enable_device_token ?? 'no',
@@ -204,9 +211,9 @@ export class DsmClient {
     return res
   }
 
-  /** 登出（doc 3.2） */
+  /** 登出（doc 3.2），session 必须与 login 时一致 */
   async logout() {
-    const res = await this.entry('SYNO.API.Auth', 'logout', { params: { session: 'webui' } })
+    const res = await this.entry('SYNO.API.Auth', 'logout', { params: { session: 'FileStation' } })
     try { await invoke('clear_session') } catch (e) { console.warn('[dsm] clear_session failed:', e) }
     return res
   }
@@ -329,19 +336,23 @@ export class DsmClient {
     return this.entry('SYNO.FileStation.Search', 'stop', { post: true, params: { taskid } })
   }
 
-  /** 构造下载 URL（doc 4.10 download），带 _sid 走 GET */
-  downloadUrl(path: string, mode: 'open' | 'download' = 'download') {
+  /** 构造下载 URL（doc 4.10 download），带 _sid 走 GET
+   *  注意：
+   *  1. 强制使用 entry.cgi 而非 apiInfo 给出的独立 cgi（独立 cgi 对 _sid 校验更严格）。
+   *  2. path 必须是 JSON 数组字符串 ["..."]，DSM 7+ 裸字符串会报 119。
+   *  3. 默认 mode='open'：DSM 7 下 mode='download' 会严格校验 GUI session cookie，
+   *     webapi 客户端拿不到 GUI session id，只能走 mode='open' 拿字节流。 */
+  downloadUrl(path: string, mode: 'open' | 'download' = 'open') {
     const info = this.apiInfo['SYNO.FileStation.Download']
-    const cgi = info?.path ?? 'entry.cgi'
     const params = new URLSearchParams({
       api: 'SYNO.FileStation.Download',
       version: String(info?.maxVersion ?? 2),
       method: 'download',
-      path,
+      path: JSON.stringify([path]),
       mode,
       _sid: this.sid,
     })
-    return `${this.baseUrl}/webapi/${cgi}?${params.toString()}`
+    return `${this.baseUrl}/webapi/entry.cgi?${params.toString()}`
   }
 
   /** 构造缩略图 URL（doc 4.5 thumb） */
@@ -359,14 +370,19 @@ export class DsmClient {
     return `${this.baseUrl}/webapi/${cgi}?${params.toString()}`
   }
 
+  /** 统一拼装认证 header（仅 X-SYNO-TOKEN），给直接 fetch 调用复用 */
+  private authHeaders(): Record<string, string> {
+    const h: Record<string, string> = {}
+    if (this.synoToken) h['X-SYNO-TOKEN'] = this.synoToken
+    return h
+  }
+
   /** 拉取缩略图字节（绕过自签名证书） */
   async thumbBytes(path: string, size: 'small' | 'medium' | 'large' | 'original' = 'small'): Promise<ArrayBuffer> {
     const url = this.thumbUrl(path, size)
-    const headers: Record<string, string> = {}
-    if (this.synoToken) headers['X-SYNO-TOKEN'] = this.synoToken
     const res = await fetch(url, {
       method: 'GET',
-      headers,
+      headers: this.authHeaders(),
       danger: { acceptInvalidCerts: true, acceptInvalidHostnames: true },
     } as any)
     return await res.arrayBuffer()
@@ -388,8 +404,7 @@ export class DsmClient {
     form.append('file', file, file.name)
 
     const url = `${this.baseUrl}/webapi/${cgi}`
-    const headers: Record<string, string> = {}
-    if (this.synoToken) headers['X-SYNO-TOKEN'] = this.synoToken
+    const headers: Record<string, string> = this.authHeaders()
     const res = await fetch(url, {
       method: 'POST',
       headers,
@@ -407,11 +422,9 @@ export class DsmClient {
   /** 获取文件字节（用于预览或本地保存） */
   async downloadBytes(path: string): Promise<ArrayBuffer> {
     const url = this.downloadUrl(path, 'open')
-    const headers: Record<string, string> = {}
-    if (this.synoToken) headers['X-SYNO-TOKEN'] = this.synoToken
     const res = await fetch(url, {
       method: 'GET',
-      headers,
+      headers: this.authHeaders(),
       danger: { acceptInvalidCerts: true, acceptInvalidHostnames: true },
     } as any)
     return await res.arrayBuffer()

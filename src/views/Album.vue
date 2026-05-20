@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { openUrl } from '@tauri-apps/plugin-opener'
 import { dsm } from '../api/dsm'
 import { formatBytes } from '../utils/format'
 import { useMediaScan } from '../composables/useMediaScan'
+import { enqueue as enqueueDownload } from '../composables/useDownloadQueue'
 import FolderPicker from '../components/FolderPicker.vue'
 import LazyThumb from '../components/LazyThumb.vue'
 
@@ -129,8 +129,9 @@ async function viewerDownload() {
   const p = flatPhotos.value[viewerIndex.value]
   if (!p) return
   try {
-    await openUrl(dsm.downloadUrl(p.path, 'download'))
-    ElMessage.success('已交由系统浏览器下载')
+    const size = Number((p as any).additional?.size || (p as any).size || 0)
+    enqueueDownload(p.path, p.name, size)
+    ElMessage.success('已加入下载队列')
   } catch (e: any) {
     ElMessage.error('下载失败：' + (e?.message ?? e))
   }
