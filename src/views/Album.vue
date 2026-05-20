@@ -19,7 +19,7 @@ function isImage(f: any): boolean {
 
 const {
   folder, loading, items: photos, visibleCount, sentinel,
-  scan, onPickFolder, initFromStorage, setupSentinel, cleanup,
+  scan, onPickFolder, onBaseUrlChange, initFromStorage, setupSentinel, cleanup,
 } = useMediaScan({
   extensions: 'jpg,jpeg,png,gif,webp,bmp,heic',
   filterFn: isImage,
@@ -38,6 +38,7 @@ onMounted(() => {
   setupSentinel()
 })
 
+watch(() => dsm.baseUrl, () => { onBaseUrlChange() })
 
 /**
  * 从文件名中解析拍摄时间，返回秒级时间戳；解析失败返回 0。

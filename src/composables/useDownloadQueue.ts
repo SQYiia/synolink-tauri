@@ -10,7 +10,10 @@ export interface DownloadTask {
   loaded: number
   status: 'queued' | 'downloading' | 'done' | 'error' | 'cancelled'
   error?: string
+  abortCtrl?: AbortController
 }
+
+const MAX_CONCURRENT = 2
 
 const state = reactive({
   tasks: [] as DownloadTask[],
@@ -22,14 +25,18 @@ export function enqueue(path: string, name: string, size: number = 0) {
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const task: DownloadTask = { id, path, name, size, loaded: 0, status: 'queued' }
   state.tasks.unshift(task)
-  startDownload(task)
+  processQueue()
   return id
 }
 
 export function cancelTask(id: string) {
   const task = state.tasks.find(t => t.id === id)
   if (!task) return
+  if (task.status === 'downloading' && task.abortCtrl) {
+    task.abortCtrl.abort()
+  }
   task.status = 'cancelled'
+  processQueue()
 }
 
 export function removeTask(id: string) {
@@ -38,18 +45,90 @@ export function removeTask(id: string) {
 }
 
 export function clearCompleted() {
-  state.tasks.splice(0, state.tasks.length, ...state.tasks.filter(t => t.status === 'downloading' || t.status === 'queued'))
+  state.tasks = state.tasks.filter(t => t.status === 'downloading' || t.status === 'queued')
 }
+
+function activeCount() {
+  return state.tasks.filter(t => t.status === 'downloading').length
+}
+
+function processQueue() {
+  while (activeCount() < MAX_CONCURRENT) {
+    const next = state.tasks.find(t => t.status === 'queued')
+    if (!next) break
+    startDownload(next)
+  }
+}
+
+const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024 // 100MB
 
 async function startDownload(task: DownloadTask) {
   task.status = 'downloading'
+
+  // 大文件或未知大小直接交给系统浏览器下载，避免内存溢出
+  if (!task.size || task.size > LARGE_FILE_THRESHOLD) {
+    try {
+      await openUrl(dsm.downloadUrl(task.path, 'download'))
+      task.status = 'done'
+      task.loaded = task.size
+    } catch (e: any) {
+      task.status = 'error'
+      task.error = e?.message ?? String(e)
+    }
+    processQueue()
+    return
+  }
+
+  task.abortCtrl = new AbortController()
+  const url = dsm.downloadUrl(task.path, 'download')
+  const headers: Record<string, string> = {}
+  if (dsm.synoToken) headers['X-SYNO-TOKEN'] = dsm.synoToken
+
   try {
-    const url = dsm.downloadUrl(task.path, 'download')
-    await openUrl(url)
+    const res = await fetch(url, {
+      headers,
+      signal: task.abortCtrl.signal,
+      danger: { acceptInvalidCerts: true, acceptInvalidHostnames: true },
+    } as any)
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+
+    const contentLength = Number(res.headers.get('content-length') || task.size || 0)
+    if (contentLength) task.size = contentLength
+
+    const reader = res.body?.getReader()
+    if (!reader) throw new Error('No response body')
+
+    const chunks: Uint8Array[] = []
+    let received = 0
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      chunks.push(value)
+      received += value.length
+      task.loaded = received
+    }
+
+    // Create blob and trigger download
+    const blob = new Blob(chunks as BlobPart[])
+    const blobUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = blobUrl
+    a.download = task.name
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000)
+
     task.status = 'done'
-    task.loaded = task.size
   } catch (e: any) {
-    task.status = 'error'
-    task.error = e?.message ?? String(e)
+    if (e?.name === 'AbortError') {
+      task.status = 'cancelled'
+    } else {
+      task.status = 'error'
+      task.error = e?.message ?? String(e)
+    }
+  } finally {
+    task.abortCtrl = undefined
+    processQueue()
   }
 }
