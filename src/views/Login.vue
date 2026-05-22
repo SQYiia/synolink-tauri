@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAppStore } from '../stores/app'
 import { dsm } from '../api/dsm'
+import { encodePassword } from '../utils/crypto'
 
 const route = useRoute()
 const router = useRouter()
@@ -22,7 +23,6 @@ onMounted(async () => {
     router.replace('/servers')
     return
   }
-  // 初始化全局 dsm 客户端
   dsm.baseUrl = `${server.value.protocol}://${server.value.host}:${server.value.port}`
   dsm.synoToken = ''
   dsm.sid = ''
@@ -32,11 +32,10 @@ onMounted(async () => {
     ElMessage.error(`无法连接服务器：${e?.message ?? e}`)
   }
 
-  // 自动填充上次账号
   const last = app.accounts.filter(a => a.serverId === serverId).sort((a, b) => (b.lastLoginTime ?? 0) - (a.lastLoginTime ?? 0))[0]
   if (last) {
     form.account = last.account
-    form.passwd = last.password
+    form.passwd = app.getPassword(last)
   }
 })
 
@@ -54,7 +53,7 @@ async function submit() {
       if (res.success) {
         const existed = app.accounts.find(a => a.serverId === serverId && a.account === form.account)
         if (existed) {
-          existed.password = form.passwd
+          existed.password = encodePassword(form.passwd, serverId)
           existed.lastLoginTime = Date.now()
           await app.saveAccounts()
           await app.setCurrent(serverId, existed.id)
@@ -62,7 +61,7 @@ async function submit() {
           const acc = await app.addAccount({
             serverId,
             account: form.account,
-            password: form.passwd,
+            rawPassword: form.passwd,
             lastLoginTime: Date.now(),
           })
           await app.setCurrent(serverId, acc.id)

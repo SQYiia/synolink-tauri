@@ -14,6 +14,7 @@ const form = reactive({
   host: '',
   port: 5000,
   remark: '',
+  skipTlsVerify: true,
 })
 
 const loading = ref(false)
@@ -36,6 +37,7 @@ async function submit() {
       host: form.host,
       port: Number(form.port),
       remark: form.remark,
+      skipTlsVerify: form.skipTlsVerify,
     })
     ElMessage.success('服务器已保存')
     router.replace(`/login/${server.id}`)
@@ -80,6 +82,9 @@ function back() {
           </el-form-item>
           <el-form-item label="端口">
             <el-input-number v-model="form.port" :min="1" :max="65535" size="large" style="width: 100%" />
+          </el-form-item>
+          <el-form-item v-if="form.protocol === 'https'">
+            <el-checkbox v-model="form.skipTlsVerify">跳过 TLS 证书验证（自签名证书）</el-checkbox>
           </el-form-item>
           <el-form-item label="备注">
             <el-input v-model="form.remark" type="textarea" :rows="2" placeholder="可选备注信息" />

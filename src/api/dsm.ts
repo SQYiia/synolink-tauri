@@ -50,9 +50,17 @@ export class DsmClient {
   apiInfo: Record<string, ApiInfo> = {}
   synoToken = ''
   sid = ''
+  skipTlsVerify = true
 
   constructor(baseUrl = '') {
     this.baseUrl = baseUrl.replace(/\/$/, '')
+  }
+
+  private get dangerOpts() {
+    if (this.skipTlsVerify) {
+      return { acceptInvalidCerts: true, acceptInvalidHostnames: true }
+    }
+    return undefined
   }
 
   private buildUrl(path: string, params?: Record<string, any>) {
@@ -76,7 +84,6 @@ export class DsmClient {
     _retried = false,
   ): Promise<T> {
     const method = opts.method ?? 'GET'
-    // 注入 _sid（DSM session ID）
     const query = { ...(opts.query ?? {}) }
     const form = opts.form ? { ...opts.form } : undefined
     if (this.sid) {
@@ -86,9 +93,6 @@ export class DsmClient {
     const url = this.buildUrl(path, query)
     const headers: Record<string, string> = { ...(opts.headers ?? {}) }
     if (this.synoToken) headers['X-SYNO-TOKEN'] = this.synoToken
-    // 注：不注入 Cookie: id=<sid>。
-    // webapi 登录拿到的 sid 与 DSM Web GUI 登录的 cookie id 是两套独立会话，值不同；
-    // 贸然把 webapi sid 当作 cookie id 注入，DSM 拿它去校验 GUI session 表会失败 → 119。
 
     let body: string | undefined
     if (form) {
@@ -100,16 +104,10 @@ export class DsmClient {
       headers['Content-Type'] = 'application/x-www-form-urlencoded'
     }
 
-    const res = await fetch(url, {
-      method,
-      headers,
-      body,
-      // 群晖 NAS 常为自签名证书，跳过 TLS 校验
-      danger: {
-        acceptInvalidCerts: true,
-        acceptInvalidHostnames: true,
-      },
-    } as any)
+    const fetchOpts: any = { method, headers, body }
+    if (this.dangerOpts) fetchOpts.danger = this.dangerOpts
+
+    const res = await fetch(url, fetchOpts)
     const text = await res.text()
     let parsed: any
     try {
@@ -117,11 +115,9 @@ export class DsmClient {
     } catch {
       return text as any
     }
-    // 会话失效（code=119 / 105 / 106 / 107）自动重登并重放一次
     const code = parsed?.error?.code
     const SESSION_LOST = code === 119 || code === 105 || code === 106 || code === 107
     if (!_retried && parsed?.success === false && SESSION_LOST && sessionRecoverer) {
-      // 登出登入接口自身不走恢复，避免死循环
       const isAuthCall = (opts.form?.api === 'SYNO.API.Auth') || (opts.query?.api === 'SYNO.API.Auth') || path.endsWith('/auth.cgi')
       if (!isAuthCall) {
         if (!reloginInflight) reloginInflight = sessionRecoverer().finally(() => { reloginInflight = null })
@@ -172,10 +168,7 @@ export class DsmClient {
   }
 
   /** 明文登录（doc 3.1 method=login）
-   *  注意：必须使用 session='FileStation' 登录！
-   *  SYNO.FileStation.* 系列 API（尤其是 Download）对 session 类型校验严格，
-   *  使用 'webui' 或其他 session 名会导致 Download 接口返回错误码 119（即使参数、cookie、URL 全部正确）。
-   *  SYNO.Core.* 系列在 FileStation session 下同样可用（File Station 应用内部本就调这些）。 */
+   *  注意：必须使用 session='FileStation' 登录！ */
   async login(params: {
     account: string
     passwd: string
@@ -199,7 +192,6 @@ export class DsmClient {
     if (res.success && res.data) {
       this.sid = res.data.sid ?? ''
       this.synoToken = res.data.synotoken ?? ''
-      // 同步会话给 Rust 端（用于 dsm:// 代理流式播放）
       try {
         await invoke('set_session', {
           baseUrl: this.baseUrl,
@@ -211,7 +203,7 @@ export class DsmClient {
     return res
   }
 
-  /** 登出（doc 3.2），session 必须与 login 时一致 */
+  /** 登出（doc 3.2） */
   async logout() {
     const res = await this.entry('SYNO.API.Auth', 'logout', { params: { session: 'FileStation' } })
     try { await invoke('clear_session') } catch (e) { console.warn('[dsm] clear_session failed:', e) }
@@ -293,8 +285,7 @@ export class DsmClient {
     })
   }
 
-  /** 搜索：启动任务（doc 4.15 start）
-   *  注意：pattern 留空表示搜索所有文件；传 `*` 会被 DSM 当作不合法正则立即返回空。 */
+  /** 搜索：启动任务（doc 4.15 start） */
   async searchStart(
     folderPath: string,
     pattern = '',
@@ -314,9 +305,7 @@ export class DsmClient {
     })
   }
 
-  /** 搜索：拉取结果
-   *  注意：DSM 不同版本对 additional 的接受格式不一致（逗号分隔 vs JSON 数组）。
-   *  默认使用 JSON 数组形式，兼容性更好。 */
+  /** 搜索：拉取结果 */
   async searchList(
     taskid: string,
     opts: { offset?: number; limit?: number; additional?: string } = {},
@@ -336,12 +325,7 @@ export class DsmClient {
     return this.entry('SYNO.FileStation.Search', 'stop', { post: true, params: { taskid } })
   }
 
-  /** 构造下载 URL（doc 4.10 download），带 _sid 走 GET
-   *  注意：
-   *  1. 强制使用 entry.cgi 而非 apiInfo 给出的独立 cgi（独立 cgi 对 _sid 校验更严格）。
-   *  2. path 必须是 JSON 数组字符串 ["..."]，DSM 7+ 裸字符串会报 119。
-   *  3. 默认 mode='open'：DSM 7 下 mode='download' 会严格校验 GUI session cookie，
-   *     webapi 客户端拿不到 GUI session id，只能走 mode='open' 拿字节流。 */
+  /** 构造下载 URL */
   downloadUrl(path: string, mode: 'open' | 'download' = 'open') {
     const info = this.apiInfo['SYNO.FileStation.Download']
     const params = new URLSearchParams({
@@ -370,7 +354,6 @@ export class DsmClient {
     return `${this.baseUrl}/webapi/${cgi}?${params.toString()}`
   }
 
-  /** 统一拼装认证 header（仅 X-SYNO-TOKEN），给直接 fetch 调用复用 */
   private authHeaders(): Record<string, string> {
     const h: Record<string, string> = {}
     if (this.synoToken) h['X-SYNO-TOKEN'] = this.synoToken
@@ -380,11 +363,12 @@ export class DsmClient {
   /** 拉取缩略图字节（绕过自签名证书） */
   async thumbBytes(path: string, size: 'small' | 'medium' | 'large' | 'original' = 'small'): Promise<ArrayBuffer> {
     const url = this.thumbUrl(path, size)
-    const res = await fetch(url, {
+    const fetchOpts: any = {
       method: 'GET',
       headers: this.authHeaders(),
-      danger: { acceptInvalidCerts: true, acceptInvalidHostnames: true },
-    } as any)
+    }
+    if (this.dangerOpts) fetchOpts.danger = this.dangerOpts
+    const res = await fetch(url, fetchOpts)
     return await res.arrayBuffer()
   }
 
@@ -405,12 +389,9 @@ export class DsmClient {
 
     const url = `${this.baseUrl}/webapi/${cgi}`
     const headers: Record<string, string> = this.authHeaders()
-    const res = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: form,
-      danger: { acceptInvalidCerts: true, acceptInvalidHostnames: true },
-    } as any)
+    const fetchOpts: any = { method: 'POST', headers, body: form }
+    if (this.dangerOpts) fetchOpts.danger = this.dangerOpts
+    const res = await fetch(url, fetchOpts)
     const text = await res.text()
     try {
       return JSON.parse(text) as DsmResponse
@@ -422,11 +403,12 @@ export class DsmClient {
   /** 获取文件字节（用于预览或本地保存） */
   async downloadBytes(path: string): Promise<ArrayBuffer> {
     const url = this.downloadUrl(path, 'open')
-    const res = await fetch(url, {
+    const fetchOpts: any = {
       method: 'GET',
       headers: this.authHeaders(),
-      danger: { acceptInvalidCerts: true, acceptInvalidHostnames: true },
-    } as any)
+    }
+    if (this.dangerOpts) fetchOpts.danger = this.dangerOpts
+    const res = await fetch(url, fetchOpts)
     return await res.arrayBuffer()
   }
 

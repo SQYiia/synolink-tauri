@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { LazyStore } from '@tauri-apps/plugin-store'
+import { encodePassword, decodePassword } from '../utils/crypto'
 
 export interface ServerConfig {
   id: string
@@ -9,12 +10,14 @@ export interface ServerConfig {
   port: number
   remark?: string
   createTime: number
+  skipTlsVerify?: boolean
 }
 
 export interface AccountConfig {
   id: string
   serverId: string
   account: string
+  /** 编码后的密码（非明文） */
   password: string
   isDefault?: boolean
   lastLoginTime?: number
@@ -60,12 +63,23 @@ export const useAppStore = defineStore('app', {
       await this.saveServers()
       await this.saveAccounts()
     },
-    async addAccount(a: Omit<AccountConfig, 'id'>) {
+    async addAccount(a: Omit<AccountConfig, 'id'> & { rawPassword: string }) {
       const id = crypto.randomUUID()
-      const acc: AccountConfig = { ...a, id }
+      const acc: AccountConfig = {
+        id,
+        serverId: a.serverId,
+        account: a.account,
+        password: encodePassword(a.rawPassword, a.serverId),
+        isDefault: a.isDefault,
+        lastLoginTime: a.lastLoginTime,
+      }
       this.accounts.push(acc)
       await this.saveAccounts()
       return acc
+    },
+    /** 获取解码后的明文密码 */
+    getPassword(account: AccountConfig): string {
+      return decodePassword(account.password, account.serverId)
     },
     async setCurrent(serverId: string, accountId: string) {
       this.currentServerId = serverId
