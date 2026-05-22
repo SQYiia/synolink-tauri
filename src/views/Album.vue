@@ -18,8 +18,8 @@ function isImage(f: any): boolean {
 }
 
 const {
-  folder, loading, items: photos, visibleCount, sentinel,
-  scan, onPickFolder, onBaseUrlChange, initFromStorage, setupSentinel, cleanup,
+  folder, loading, items: photos,
+  scan, onPickFolder, onBaseUrlChange, initFromStorage,
 } = useMediaScan({
   extensions: 'jpg,jpeg,png,gif,webp,bmp,heic',
   filterFn: isImage,
@@ -32,17 +32,32 @@ const viewerOpen = ref(false)
 const viewerIndex = ref(0)
 const pickerOpen = ref(false)
 
-onMounted(() => {
-  const hasFolder = initFromStorage()
-  if (hasFolder) scan()
-  setupSentinel()
+// ─── Virtual Scroll State ──────────────────────────────────
+const scrollEl = ref<HTMLElement | null>(null)
+const containerWidth = ref(0)
+const scrollTop = ref(0)
+const viewportHeight = ref(0)
+const floatingDateVisible = ref(false)
+let floatingDateTimer: ReturnType<typeof setTimeout> | null = null
+let rafId: number | null = null
+let resizeObserver: ResizeObserver | null = null
+
+const GAP = 4
+const MIN_COL_WIDTH = 140
+const HEADER_HEIGHT = 32
+const BUFFER = 1000
+
+const colCount = computed(() => {
+  if (containerWidth.value <= 0) return 1
+  return Math.max(1, Math.floor((containerWidth.value + GAP) / (MIN_COL_WIDTH + GAP)))
 })
 
-watch(() => dsm.baseUrl, () => { onBaseUrlChange() })
+const cellSize = computed(() => {
+  if (containerWidth.value <= 0) return MIN_COL_WIDTH
+  return (containerWidth.value - (colCount.value - 1) * GAP) / colCount.value
+})
 
-/**
- * 从文件名中解析拍摄时间，返回秒级时间戳；解析失败返回 0。
- */
+// ─── Date helpers ──────────────────────────────────────────
 function parseNameTime(name: string): number {
   if (!name) return 0
   const m = name.match(/(19|20)(\d{2})[-_]?(\d{2})[-_]?(\d{2})(?:[\s_\-T]?(\d{2})[\.\-:]?(\d{2})(?:[\.\-:]?(\d{2}))?)?/)
@@ -59,7 +74,6 @@ function parseNameTime(name: string): number {
   return Math.floor(t / 1000)
 }
 
-/** 获取照片时间（秒级）：文件名 > crtime > mtime */
 function photoTime(p: any): number {
   const byName = parseNameTime(p?.name || '')
   if (byName) return byName
@@ -68,7 +82,13 @@ function photoTime(p: any): number {
   return Number(p?.additional?.time?.mtime ?? 0)
 }
 
-/** 全量按日期倒序 */
+function dateLabel(p: any): string {
+  const t = photoTime(p)
+  if (!t) return '未知日期'
+  const d = new Date(t * 1000)
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`
+}
+
 const flatPhotos = computed(() => {
   const arr = [...photos.value]
   arr.sort((a, b) => {
@@ -82,25 +102,119 @@ const flatPhotos = computed(() => {
   return arr
 })
 
-/** 实际渲染到 DOM 的部分 */
-const visiblePhotos = computed(() => flatPhotos.value.slice(0, visibleCount.value))
+// ─── Layout segments ──────────────────────────────────────
+type Segment =
+  | { type: 'header'; key: string; date: string; count: number; offset: number; height: number }
+  | { type: 'row'; key: string; photos: any[]; offset: number; height: number }
 
-/** 基于可见部分的分组 */
-const groupedPhotos = computed(() => {
-  const map = new Map<string, any[]>()
-  for (const p of visiblePhotos.value) {
-    const t = photoTime(p)
-    let key = '未知日期'
-    if (t) {
-      const d = new Date(t * 1000)
-      key = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`
+const segments = computed<Segment[]>(() => {
+  const cols = colCount.value
+  const cell = cellSize.value
+  const all = flatPhotos.value
+  if (!all.length || cell <= 0) return []
+
+  const groups: { date: string; photos: any[] }[] = []
+  let curDate = ''
+  for (const p of all) {
+    const d = dateLabel(p)
+    if (d !== curDate) {
+      curDate = d
+      groups.push({ date: d, photos: [] })
     }
-    if (!map.has(key)) map.set(key, [])
-    map.get(key)!.push(p)
+    groups[groups.length - 1].photos.push(p)
   }
-  return Array.from(map.entries())
+
+  const segs: Segment[] = []
+  let offset = 0
+  for (const g of groups) {
+    segs.push({
+      type: 'header',
+      key: `h-${g.date}`,
+      date: g.date,
+      count: g.photos.length,
+      offset,
+      height: HEADER_HEIGHT,
+    })
+    offset += HEADER_HEIGHT
+
+    for (let i = 0; i < g.photos.length; i += cols) {
+      const row = g.photos.slice(i, i + cols)
+      segs.push({
+        type: 'row',
+        key: `r-${row[0].path}`,
+        photos: row,
+        offset,
+        height: cell,
+      })
+      offset += cell + GAP
+    }
+  }
+  return segs
 })
 
+const totalHeight = computed(() => {
+  const s = segments.value
+  if (!s.length) return 0
+  const last = s[s.length - 1]
+  return last.offset + last.height
+})
+
+const visibleSegments = computed(() => {
+  const top = scrollTop.value - BUFFER
+  const bottom = scrollTop.value + viewportHeight.value + BUFFER
+  return segments.value.filter(
+    (s) => s.offset + s.height > top && s.offset < bottom,
+  )
+})
+
+const floatingDate = computed(() => {
+  const st = scrollTop.value
+  const segs = segments.value
+  let last = ''
+  for (const s of segs) {
+    if (s.type === 'header') last = s.date
+    if (s.offset > st + 60) break
+  }
+  return last
+})
+
+// ─── Scroll handling ──────────────────────────────────────
+function onScroll() {
+  if (rafId !== null) return
+  rafId = requestAnimationFrame(() => {
+    rafId = null
+    if (!scrollEl.value) return
+    scrollTop.value = scrollEl.value.scrollTop
+
+    floatingDateVisible.value = true
+    if (floatingDateTimer) clearTimeout(floatingDateTimer)
+    floatingDateTimer = setTimeout(() => {
+      floatingDateVisible.value = false
+    }, 1500)
+  })
+}
+
+// ─── Lifecycle ──────────────────────────────────────────
+onMounted(() => {
+  const hasFolder = initFromStorage()
+  if (hasFolder) scan()
+
+  if (scrollEl.value) {
+    resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        containerWidth.value = entry.contentRect.width
+        viewportHeight.value = entry.contentRect.height
+      }
+    })
+    resizeObserver.observe(scrollEl.value)
+    containerWidth.value = scrollEl.value.clientWidth
+    viewportHeight.value = scrollEl.value.clientHeight
+  }
+})
+
+watch(() => dsm.baseUrl, () => { onBaseUrlChange() })
+
+// ─── Thumbnail / viewer ──────────────────────────────────
 function thumbOf(p: any) {
   return dsm.mediaUrl('thumb', p.path, { size: 'small' })
 }
@@ -170,7 +284,9 @@ watch(viewerOpen, (open) => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onViewerKey)
-  cleanup()
+  resizeObserver?.disconnect()
+  if (rafId !== null) cancelAnimationFrame(rafId)
+  if (floatingDateTimer) clearTimeout(floatingDateTimer)
 })
 </script>
 
@@ -193,8 +309,8 @@ onBeforeUnmount(() => {
       <span class="count">共 {{ photos.length }} 张</span>
     </div>
 
-    <!-- 主体 -->
-    <main class="body" v-loading="loading">
+    <!-- 主体：虚拟滚动容器 -->
+    <main ref="scrollEl" class="body" @scroll="onScroll" v-loading="loading">
       <div v-if="!folder" class="empty">
         <el-icon :size="64" color="#c0c4cc"><Picture /></el-icon>
         <div style="margin-top:12px">请选择要浏览的图片目录</div>
@@ -205,36 +321,55 @@ onBeforeUnmount(() => {
         <div style="margin-top:12px">此目录暂无图片</div>
       </div>
 
-      <div v-for="[date, list] in groupedPhotos" :key="date" class="date-group">
-        <h3 class="date-title">
-          <el-icon><Calendar /></el-icon>
-          <span>{{ date }}</span>
-          <span class="date-count">{{ list.length }}</span>
-        </h3>
-        <div class="grid">
-          <div
-            v-for="p in list"
-            :key="p.path"
-            class="cell"
-            @click="openPhoto(p)"
-            :title="p.name"
-          >
-            <LazyThumb :src="thumbOf(p)" :alt="p.name" aspect-ratio="1/1">
-              <template #fallback>
-                <el-icon :size="32"><Picture /></el-icon>
-              </template>
-            </LazyThumb>
-          </div>
-        </div>
-      </div>
+      <template v-else>
+        <!-- 浮动日期指示器 -->
+        <div
+          v-if="floatingDate && floatingDateVisible && flatPhotos.length > 0"
+          class="floating-date"
+        >{{ floatingDate }}</div>
 
-      <!-- 底部哨兵：滴入视口时追加下一批 -->
-      <div ref="sentinel" class="sentinel">
-        <span v-if="visibleCount < flatPhotos.length">
-          已展示 {{ visibleCount }} / {{ flatPhotos.length }}，继续下滑加载…
-        </span>
-        <span v-else-if="flatPhotos.length > 0">共 {{ flatPhotos.length }} 张照片</span>
-      </div>
+        <!-- 虚拟高度占位 -->
+        <div class="virtual-spacer" :style="{ height: totalHeight + 'px' }">
+          <template v-for="seg in visibleSegments" :key="seg.key">
+            <!-- 日期头 -->
+            <div
+              v-if="seg.type === 'header'"
+              class="date-title"
+              :style="{ position: 'absolute', top: seg.offset + 'px', width: '100%' }"
+            >
+              <el-icon><Calendar /></el-icon>
+              <span>{{ (seg as any).date }}</span>
+              <span class="date-count">{{ (seg as any).count }}</span>
+            </div>
+            <!-- 照片行 -->
+            <div
+              v-else
+              class="virtual-row"
+              :style="{ position: 'absolute', top: seg.offset + 'px', width: '100%', height: cellSize + 'px' }"
+            >
+              <div
+                v-for="p in (seg as any).photos"
+                :key="p.path"
+                class="cell"
+                :style="{ width: cellSize + 'px', height: cellSize + 'px' }"
+                @click="openPhoto(p)"
+                :title="p.name"
+              >
+                <LazyThumb :src="thumbOf(p)" :alt="p.name" aspect-ratio="1/1">
+                  <template #fallback>
+                    <el-icon :size="32"><Picture /></el-icon>
+                  </template>
+                </LazyThumb>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- 底部统计 -->
+        <div class="bottom-stat" v-if="flatPhotos.length > 0">
+          共 {{ flatPhotos.length }} 张照片
+        </div>
+      </template>
     </main>
 
     <!-- 查看器 -->
@@ -294,12 +429,20 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.page { padding: 20px 24px 24px; max-width: 1400px; margin: 0 auto; }
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 20px 24px 0;
+  max-width: 1400px;
+  margin: 0 auto;
+}
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 0 16px;
   border-bottom: var(--sl-border);
   margin-bottom: 16px;
+  flex-shrink: 0;
 }
 .title { margin: 0; font-size: 16px; font-weight: 600; color: var(--el-text-color-primary); }
 .actions { display: flex; gap: 8px; }
@@ -307,36 +450,75 @@ onBeforeUnmount(() => {
   display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--el-text-color-secondary);
   background: var(--sl-bg-card); border-radius: var(--sl-radius-sm); padding: 8px 12px; margin-bottom: 12px;
   border: var(--sl-border);
+  flex-shrink: 0;
 }
 .folder-path { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .count { color: var(--sl-primary); font-weight: 600; }
-.body { min-height: 200px; }
+
+.body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: relative;
+  min-height: 0;
+}
+
 .empty { text-align: center; padding: 48px 0; color: var(--el-text-color-secondary); font-size: 13px; }
-.date-group { margin-bottom: 16px; }
+
+/* 浮动日期指示器 */
+.floating-date {
+  position: sticky;
+  top: 8px;
+  z-index: 10;
+  display: inline-block;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 14px;
+  border-radius: 20px;
+  pointer-events: none;
+  margin-left: 50%;
+  transform: translateX(-50%);
+  backdrop-filter: blur(8px);
+  transition: opacity 0.3s;
+}
+
+/* 虚拟滚动容器 */
+.virtual-spacer {
+  position: relative;
+  width: 100%;
+}
+
 .date-title {
   display: flex; align-items: center; gap: 6px;
-  margin: 0 0 8px; padding: 6px 0;
+  padding: 6px 0;
   font-size: 11px; font-weight: 600; color: var(--el-text-color-secondary);
   text-transform: uppercase; letter-spacing: 0.05em;
-  position: sticky; top: 0;
-  background: var(--el-bg-color-page);
-  z-index: 1;
+  box-sizing: border-box;
 }
 .date-count {
   margin-left: 6px; font-size: 11px; color: var(--el-text-color-placeholder); font-weight: 400;
 }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 4px; }
-.sentinel {
-  text-align: center; padding: 16px 0; font-size: 12px; color: var(--el-text-color-secondary);
-  min-height: 40px;
+
+.virtual-row {
+  display: flex;
+  gap: 4px;
 }
+
 .cell {
   cursor: pointer; border-radius: var(--sl-radius-sm); overflow: hidden; background: var(--el-fill-color);
-  aspect-ratio: 1 / 1;
+  flex-shrink: 0;
   transition: opacity var(--sl-transition-fast);
 }
 .cell:hover { opacity: 0.85; }
 .cell:active { opacity: 0.7; }
+
+.bottom-stat {
+  text-align: center; padding: 16px 0; font-size: 12px; color: var(--el-text-color-secondary);
+}
+
+/* Viewer */
 .viewer { position: relative; display: flex; justify-content: center; align-items: center; min-height: 70vh; background: #000; border-radius: var(--sl-radius-sm); overflow: hidden; }
 .viewer-img { max-width: 100%; max-height: 80vh; object-fit: contain; }
 .viewer-img.placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 300px; height: 300px; background: #222; color: #ccc; }
@@ -347,4 +529,8 @@ onBeforeUnmount(() => {
 .viewer-counter { text-align: center; color: var(--el-text-color-secondary); margin-top: 8px; font-size: 12px; }
 .viewer-info { text-align: center; color: var(--el-text-color-secondary); font-size: 12px; margin-top: 6px; display: flex; justify-content: center; gap: 16px; }
 .viewer-actions { display: flex; justify-content: center; gap: 12px; margin-top: 10px; }
+
+@media (max-width: 640px) {
+  .page { padding: 12px 12px 0; }
+}
 </style>
