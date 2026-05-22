@@ -26,6 +26,9 @@ const {
   visibleInit: 40,
   visibleStep: 40,
   storageKeyPrefix: 'video:folder',
+  // 服务端按创建时间倒序返回，节省前端排序开销。
+  sortBy: 'crtime',
+  sortDirection: 'desc',
 })
 
 const playerOpen = ref(false)

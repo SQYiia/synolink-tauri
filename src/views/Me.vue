@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { invoke } from '@tauri-apps/api/core'
 import { useAppStore } from '../stores/app'
 import { dsm } from '../api/dsm'
 import { formatBytes, formatSpeed } from '../utils/format'
@@ -64,7 +66,7 @@ onUnmounted(() => {
 async function refreshAll() {
   loading.value = true
   try {
-    await Promise.all([refreshUtil(), refreshStorage(), refreshDisks(), refreshShares()])
+    await Promise.all([refreshUtil(), refreshStorage(), refreshDisks(), refreshShares(), refreshCacheStats()])
   } finally {
     loading.value = false
   }
@@ -106,7 +108,8 @@ async function refreshStorage() {
   try {
     const res = await dsm.storageInfo()
     if (res.success && res.data) {
-      volumes.value = ((res.data as any).volumes ?? []) as any[]
+      const raw = ((res.data as any).volumes ?? []) as any[]
+      volumes.value = raw.map(normalizeVolume)
     }
   } catch (e) { console.warn('[Me] refreshStorage failed:', e) }
 }
@@ -115,10 +118,53 @@ async function refreshDisks() {
   try {
     const res = await dsm.diskInfo()
     if (res.success && res.data) {
-      disks.value = ((res.data as any).disks ?? (res.data as any)) as any[]
-      if (!Array.isArray(disks.value)) disks.value = []
+      const raw = ((res.data as any).disks ?? (res.data as any)) as any[]
+      const arr = Array.isArray(raw) ? raw : []
+      disks.value = arr.map(normalizeDisk)
     }
   } catch (e) { console.warn('[Me] refreshDisks failed:', e) }
+}
+
+// DSM 不同版本、不同存储后端返回的字段名不一致：可能平铺为 size_total / size_free_user，
+// 也可能嵌套为 size: { total, used, free_user }，且数值常以字符串字节数返回。
+// 这里统一规范化，保证 UI 能正确取到 size/used/free。
+function normalizeVolume(v: any) {
+  const sizeObj = (v?.size && typeof v.size === 'object') ? v.size : null
+  const size = Number(
+    v?.size_total ?? sizeObj?.total ?? v?.total ??
+    (typeof v?.size === 'number' || typeof v?.size === 'string' ? v.size : 0)
+  ) || 0
+  const free = Number(
+    v?.size_free_user ?? sizeObj?.free_user ?? sizeObj?.free ?? v?.free ?? 0
+  ) || 0
+  let used = Number(
+    v?.size_used ?? v?.used_size ?? sizeObj?.used ?? v?.used ?? 0
+  ) || 0
+  if (!used && size > 0 && free > 0) used = Math.max(0, size - free)
+  return {
+    ...v,
+    _name: v?.display_name ?? v?.volume_path ?? v?.id ?? '-',
+    _size: size,
+    _used: used,
+    _status: v?.status ?? v?.volume_status,
+  }
+}
+
+function normalizeDisk(d: any) {
+  const sizeObj = (d?.size && typeof d.size === 'object') ? d.size : null
+  const size = Number(
+    d?.size_total ?? sizeObj?.total ?? d?.capacity ??
+    (typeof d?.size === 'number' || typeof d?.size === 'string' ? d.size : 0)
+  ) || 0
+  const temp = Number(d?.temp ?? d?.temperature ?? 0) || 0
+  return {
+    ...d,
+    _name: d?.name ?? d?.disk_id ?? d?.id ?? d?.disk_path ?? '-',
+    _model: [d?.vendor, d?.model].filter(Boolean).join(' ').trim() || d?.model || '',
+    _temp: temp,
+    _size: size,
+    _status: d?.status ?? d?.smart_status ?? d?.smart_test_status ?? '',
+  }
 }
 
 async function refreshShares() {
@@ -131,9 +177,50 @@ async function refreshShares() {
   } catch (e) { console.warn('[Me] refreshShares failed:', e) }
 }
 
+// ============ 缩略图本地缓存 ============
+const cacheSize = ref(0)
+const cacheCount = ref(0)
+const cacheBusy = ref(false)
+const CACHE_LIMIT_BYTES = 200 * 1024 * 1024
+
+async function refreshCacheStats() {
+  try {
+    const res = await invoke<[number, number] | { 0: number; 1: number }>('get_thumb_cache_stats')
+    const total = Array.isArray(res) ? Number(res[0]) : Number((res as any)[0] ?? 0)
+    const count = Array.isArray(res) ? Number(res[1]) : Number((res as any)[1] ?? 0)
+    cacheSize.value = total || 0
+    cacheCount.value = count || 0
+  } catch (e) { console.warn('[Me] cache stats failed:', e) }
+}
+
+async function clearCache() {
+  try {
+    await ElMessageBox.confirm('确定清除全部缩略图缓存？后续访问相册将重新从 NAS 拉取。', '清除缓存', {
+      confirmButtonText: '清除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+  } catch { return }
+  cacheBusy.value = true
+  try {
+    const removed = await invoke<number>('clear_thumb_cache')
+    ElMessage.success(`已释放 ${formatBytes(Number(removed) || 0)}`)
+    await refreshCacheStats()
+  } catch (e) {
+    ElMessage.error('清除失败：' + String(e))
+  } finally {
+    cacheBusy.value = false
+  }
+}
+
+function cachePct() {
+  if (!CACHE_LIMIT_BYTES) return 0
+  return Math.min(100, Math.round((cacheSize.value / CACHE_LIMIT_BYTES) * 100))
+}
+
 function volPct(v: any) {
-  const used = Number(v.used ?? 0)
-  const size = Number(v.size ?? v.total ?? 0)
+  const used = Number(v?._used ?? v?.used ?? 0)
+  const size = Number(v?._size ?? v?.size ?? v?.total ?? 0)
   return size ? Math.round((used / size) * 100) : 0
 }
 function pctColor(p: number) {
@@ -228,32 +315,32 @@ function switchServer() {
     <!-- 存储卷 -->
     <div class="section-title" v-if="volumes.length"><span>STORAGE</span></div>
     <div class="volumes">
-      <div v-for="v in volumes" :key="v.id ?? v.volume_path ?? v.fs_type" class="vol-card">
+      <div v-for="v in volumes" :key="v.id ?? v.volume_path ?? v._name" class="vol-card">
         <div class="vol-head">
-          <span class="vol-name">{{ v.volume_path ?? v.id }}</span>
+          <span class="vol-name">{{ v._name }}</span>
           <span class="vol-pct">{{ volPct(v) }}%</span>
         </div>
         <div class="vol-bar">
           <div class="vol-fill" :style="{ width: volPct(v) + '%', background: pctColor(volPct(v)) }"></div>
         </div>
-        <div class="vol-detail">{{ formatBytes(Number(v.used ?? 0)) }} / {{ formatBytes(Number(v.size ?? v.total ?? 0)) }}</div>
+        <div class="vol-detail">{{ formatBytes(v._used) }} / {{ formatBytes(v._size) }}</div>
       </div>
     </div>
 
     <!-- 磁盘健康 -->
     <div class="section-title" v-if="disks.length"><span>DISK HEALTH</span></div>
     <div class="disks" v-if="disks.length">
-      <div v-for="d in disks" :key="d.id ?? d.name" class="disk-card">
+      <div v-for="d in disks" :key="d.id ?? d._name" class="disk-card">
         <div class="disk-head">
-          <span class="disk-name">{{ d.name || d.id }}</span>
-          <span class="disk-status" :class="(d.status ?? d.smart_status ?? '').toLowerCase() === 'normal' ? 'ok' : 'warn'">
-            {{ d.status ?? d.smart_status ?? '未知' }}
+          <span class="disk-name">{{ d._name }}</span>
+          <span class="disk-status" :class="String(d._status).toLowerCase() === 'normal' ? 'ok' : 'warn'">
+            {{ d._status || '未知' }}
           </span>
         </div>
         <div class="disk-detail">
-          <span v-if="d.model">{{ d.model }}</span>
-          <span v-if="d.temp">{{ d.temp }}°C</span>
-          <span v-if="d.size_total">{{ formatBytes(Number(d.size_total)) }}</span>
+          <span v-if="d._model">{{ d._model }}</span>
+          <span v-if="d._temp">{{ d._temp }}°C</span>
+          <span v-if="d._size">{{ formatBytes(d._size) }}</span>
         </div>
       </div>
     </div>
@@ -263,6 +350,32 @@ function switchServer() {
     <div class="info-card">
       <div class="info-row"><span>共享文件夹</span><b>{{ sharesCount }}</b></div>
       <div class="info-row"><span>SynoToken</span><b>{{ dsm.synoToken ? '已注入' : '未下发' }}</b></div>
+    </div>
+
+    <!-- 本地缓存 -->
+    <div class="section-title">
+      <span>LOCAL CACHE</span>
+      <span class="right">上限 {{ formatBytes(CACHE_LIMIT_BYTES) }}</span>
+    </div>
+    <div class="vol-card">
+      <div class="vol-head">
+        <span class="vol-name">缩略图缓存</span>
+        <span class="vol-pct">{{ cachePct() }}%</span>
+      </div>
+      <div class="vol-bar">
+        <div class="vol-fill" :style="{ width: cachePct() + '%', background: pctColor(cachePct()) }"></div>
+      </div>
+      <div class="vol-detail">
+        {{ formatBytes(cacheSize) }} / {{ formatBytes(CACHE_LIMIT_BYTES) }} · {{ cacheCount }} 个文件
+      </div>
+      <div class="cache-actions">
+        <el-button size="small" :loading="cacheBusy" @click="refreshCacheStats" text>
+          <el-icon><Refresh /></el-icon><span style="margin-left:4px">刷新</span>
+        </el-button>
+        <el-button size="small" type="danger" :loading="cacheBusy" @click="clearCache" plain>
+          清除缓存
+        </el-button>
+      </div>
     </div>
 
     <!-- 操作区 -->
@@ -409,4 +522,5 @@ function switchServer() {
 
 /* Actions */
 .actions { margin-top: 24px; }
+.cache-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 </style>

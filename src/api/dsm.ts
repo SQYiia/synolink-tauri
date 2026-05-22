@@ -367,19 +367,27 @@ export class DsmClient {
 
   /** 搜索：拉取结果
    *  注意：DSM 不同版本对 additional 的接受格式不一致（逗号分隔 vs JSON 数组）。
-   *  默认使用 JSON 数组形式，兼容性更好。 */
+   *  默认使用 JSON 数组形式，兼容性更好。
+   *  sort_by/sort_direction 由 DSM 服务端排序，避免前端拉回后重排。 */
   async searchList(
     taskid: string,
-    opts: { offset?: number; limit?: number; additional?: string } = {},
+    opts: {
+      offset?: number
+      limit?: number
+      additional?: string
+      sortBy?: 'name' | 'size' | 'user' | 'group' | 'mtime' | 'atime' | 'ctime' | 'crtime' | 'type' | 'posix'
+      sortDirection?: 'asc' | 'desc'
+    } = {},
   ) {
-    return this.entry('SYNO.FileStation.Search', 'list', {
-      params: {
-        taskid,
-        offset: opts.offset ?? 0,
-        limit: opts.limit ?? 100,
-        additional: opts.additional ?? '["real_path","size","time","type","perm"]',
-      },
-    })
+    const params: Record<string, any> = {
+      taskid,
+      offset: opts.offset ?? 0,
+      limit: opts.limit ?? 100,
+      additional: opts.additional ?? '["real_path","size","time","type","perm"]',
+    }
+    if (opts.sortBy) params.sort_by = opts.sortBy
+    if (opts.sortDirection) params.sort_direction = opts.sortDirection
+    return this.entry('SYNO.FileStation.Search', 'list', { params })
   }
 
   /** 搜索：停止任务 */

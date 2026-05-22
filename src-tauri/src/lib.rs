@@ -1,7 +1,8 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use futures_util::StreamExt;
 use serde::Serialize;
 use tauri::http::Response;
@@ -19,6 +20,8 @@ struct AppState {
     session: RwLock<Session>,
     http: reqwest::Client,
     cancels: RwLock<HashMap<String, Arc<AtomicBool>>>,
+    thumb_cache_dir: RwLock<Option<PathBuf>>,
+    thumb_write_counter: AtomicUsize,
 }
 
 impl Default for AppState {
@@ -34,6 +37,8 @@ impl Default for AppState {
             session: RwLock::new(Session::default()),
             http,
             cancels: RwLock::new(HashMap::new()),
+            thumb_cache_dir: RwLock::new(None),
+            thumb_write_counter: AtomicUsize::new(0),
         }
     }
 }
@@ -408,11 +413,156 @@ fn guess_mime(path: &str) -> Option<&'static str> {
     })
 }
 
+// ===== 缩略图本地磁盘缓存 =====
+// 缓存目录：app_cache_dir/thumbs/
+// 键：size 前缀 + 16 位 16 进制 hash(base_url + path + size)
+// 容量上限：THUMB_CACHE_MAX_BYTES，超出后按 mtime 升序（FIFO）删除
+// 调度：每写入 THUMB_CACHE_CHECK_EVERY 次后异步检查一次容量
+const THUMB_CACHE_MAX_BYTES: u64 = 200 * 1024 * 1024;
+const THUMB_CACHE_CHECK_EVERY: usize = 50;
+
+fn thumb_cache_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
+    let state = app.state::<AppState>();
+    if let Ok(g) = state.thumb_cache_dir.read() {
+        if let Some(p) = g.as_ref() {
+            return Some(p.clone());
+        }
+    }
+    let base = app.path().app_cache_dir().ok()?;
+    let dir = base.join("thumbs");
+    if !dir.exists() {
+        let _ = std::fs::create_dir_all(&dir);
+    }
+    if let Ok(mut g) = state.thumb_cache_dir.write() {
+        *g = Some(dir.clone());
+    }
+    Some(dir)
+}
+
+fn thumb_cache_key(base_url: &str, path: &str, size: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    base_url.hash(&mut h);
+    path.hash(&mut h);
+    size.hash(&mut h);
+    format!("{}_{:016x}.bin", size, h.finish())
+}
+
+fn thumb_cache_read(dir: &Path, key: &str) -> Option<Vec<u8>> {
+    let p = dir.join(key);
+    let bytes = std::fs::read(&p).ok()?;
+    if bytes.is_empty() {
+        return None;
+    }
+    Some(bytes)
+}
+
+fn thumb_cache_write(dir: &Path, key: &str, bytes: &[u8]) {
+    let p = dir.join(key);
+    let tmp = dir.join(format!("{}.tmp", key));
+    if std::fs::write(&tmp, bytes).is_ok() {
+        let _ = std::fs::rename(&tmp, &p);
+    }
+}
+
+fn enforce_thumb_cache_limit(dir: PathBuf, max_bytes: u64) {
+    let mut entries: Vec<(PathBuf, u64, SystemTime)> = Vec::new();
+    let rd = match std::fs::read_dir(&dir) {
+        Ok(r) => r,
+        Err(_) => return,
+    };
+    let mut total: u64 = 0;
+    for ent in rd.flatten() {
+        let p = ent.path();
+        if !p.is_file() {
+            continue;
+        }
+        if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+            if name.ends_with(".tmp") {
+                let _ = std::fs::remove_file(&p);
+                continue;
+            }
+        }
+        if let Ok(meta) = ent.metadata() {
+            let sz = meta.len();
+            let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+            total = total.saturating_add(sz);
+            entries.push((p, sz, mtime));
+        }
+    }
+    if total <= max_bytes {
+        return;
+    }
+    entries.sort_by_key(|e| e.2);
+    for (p, sz, _) in entries {
+        if total <= max_bytes {
+            break;
+        }
+        if std::fs::remove_file(&p).is_ok() {
+            total = total.saturating_sub(sz);
+        }
+    }
+}
+
+fn maybe_enforce_cache(app: &tauri::AppHandle, dir: PathBuf) {
+    let state = app.state::<AppState>();
+    let n = state.thumb_write_counter.fetch_add(1, Ordering::Relaxed) + 1;
+    if n % THUMB_CACHE_CHECK_EVERY != 0 {
+        return;
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        enforce_thumb_cache_limit(dir, THUMB_CACHE_MAX_BYTES);
+    });
+}
+
+#[tauri::command]
+fn clear_thumb_cache(app: tauri::AppHandle) -> Result<u64, String> {
+    let dir = match thumb_cache_dir(&app) {
+        Some(d) => d,
+        None => return Ok(0),
+    };
+    let mut removed: u64 = 0;
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for ent in rd.flatten() {
+            let p = ent.path();
+            if p.is_file() {
+                let sz = ent.metadata().map(|m| m.len()).unwrap_or(0);
+                if std::fs::remove_file(&p).is_ok() {
+                    removed = removed.saturating_add(sz);
+                }
+            }
+        }
+    }
+    Ok(removed)
+}
+
+#[tauri::command]
+fn get_thumb_cache_stats(app: tauri::AppHandle) -> Result<(u64, u64), String> {
+    let dir = match thumb_cache_dir(&app) {
+        Some(d) => d,
+        None => return Ok((0, 0)),
+    };
+    let mut total: u64 = 0;
+    let mut count: u64 = 0;
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for ent in rd.flatten() {
+            if ent.path().is_file() {
+                if let Ok(meta) = ent.metadata() {
+                    total = total.saturating_add(meta.len());
+                    count += 1;
+                }
+            }
+        }
+    }
+    Ok((total, count))
+}
+
 async fn proxy(
     client: &reqwest::Client,
     session: Session,
     uri: String,
     range: Option<String>,
+    app: Option<tauri::AppHandle>,
 ) -> Result<Response<Vec<u8>>, String> {
     if session.base_url.is_empty() {
         return Err("session not set".into());
@@ -425,7 +575,7 @@ async fn proxy(
         return Err("missing path".into());
     }
 
-    let (target, is_stream) = match kind {
+    let (target, is_stream, is_thumb, thumb_size) = match kind {
         "/stream" => (
             format!(
                 "{}/webapi/entry.cgi?api=SYNO.FileStation.Download&version=2&method=download&mode=open&path={}&_sid={}",
@@ -434,6 +584,8 @@ async fn proxy(
                 session.sid,
             ),
             true,
+            false,
+            String::new(),
         ),
         "/thumb" => {
             let size = params.get("size").cloned().unwrap_or_else(|| "small".into());
@@ -446,9 +598,37 @@ async fn proxy(
                     session.sid,
                 ),
                 false,
+                true,
+                size,
             )
         }
         other => return Err(format!("unknown kind: {}", other)),
+    };
+
+    // 缩略图本地缓存：命中直接返回 JPEG、不请求 NAS
+    let cache_meta = if is_thumb {
+        if let Some(app) = app.as_ref() {
+            if let Some(dir) = thumb_cache_dir(app) {
+                let key = thumb_cache_key(&session.base_url, &path, &thumb_size);
+                if let Some(bytes) = thumb_cache_read(&dir, &key) {
+                    return Response::builder()
+                        .status(200)
+                        .header("Content-Type", "image/jpeg")
+                        .header("Content-Length", bytes.len().to_string())
+                        .header("Cache-Control", "public, max-age=31536000, immutable")
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(bytes)
+                        .map_err(|e| e.to_string());
+                }
+                Some((dir, key))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
     };
 
     let mut req = client.get(&target);
@@ -526,6 +706,21 @@ async fn proxy(
         builder = builder.header("Content-Type", "application/octet-stream");
     }
     builder = builder.header("Access-Control-Allow-Origin", "*");
+
+    // 缩略图请求成功后写入本地缓存
+    if let Some((dir, key)) = cache_meta {
+        if status.is_success() && !bytes.is_empty() {
+            let dir_for_write = dir.clone();
+            let bytes_for_write = bytes.to_vec();
+            tauri::async_runtime::spawn_blocking(move || {
+                thumb_cache_write(&dir_for_write, &key, &bytes_for_write);
+            });
+            if let Some(app) = app.as_ref() {
+                maybe_enforce_cache(app, dir);
+            }
+        }
+    }
+
     builder.body(bytes.to_vec()).map_err(|e| e.to_string())
 }
 
@@ -545,7 +740,7 @@ fn dsm_protocol(
     tauri::async_runtime::spawn(async move {
         let state = app.state::<AppState>();
         let session = read_session(&state);
-        let resp = match proxy(&state.http, session, uri, range).await {
+        let resp = match proxy(&state.http, session, uri, range, Some(app.clone())).await {
             Ok(r) => r,
             Err(e) => Response::builder()
                 .status(500)
@@ -571,7 +766,9 @@ pub fn run() {
             clear_session,
             download_to_file,
             cancel_download,
-            get_default_download_dir
+            get_default_download_dir,
+            clear_thumb_cache,
+            get_thumb_cache_stats
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

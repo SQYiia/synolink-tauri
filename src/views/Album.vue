@@ -26,6 +26,9 @@ const {
   visibleInit: 120,
   visibleStep: 120,
   storageKeyPrefix: 'album:folder',
+  // 服务端按创建时间倒序返回，避免前端对万级数据重复 O(n log n) 排序。
+  sortBy: 'crtime',
+  sortDirection: 'desc',
 })
 
 const viewerOpen = ref(false)
@@ -58,6 +61,12 @@ const cellSize = computed(() => {
 })
 
 // ─── Date helpers ──────────────────────────────────────────
+// 使用 WeakMap 缓存每张照片的时间/日期标签/缩略图 URL，避免在排序与分组中
+// 反复执行正则解析与字符串拼接（大量文件场景下是主要 CPU 热点）。
+const timeCache = new WeakMap<object, number>()
+const dateCache = new WeakMap<object, string>()
+const thumbCache = new WeakMap<object, string>()
+
 function parseNameTime(name: string): number {
   if (!name) return 0
   const m = name.match(/(19|20)(\d{2})[-_]?(\d{2})[-_]?(\d{2})(?:[\s_\-T]?(\d{2})[\.\-:]?(\d{2})(?:[\.\-:]?(\d{2}))?)?/)
@@ -75,32 +84,34 @@ function parseNameTime(name: string): number {
 }
 
 function photoTime(p: any): number {
-  const byName = parseNameTime(p?.name || '')
-  if (byName) return byName
-  const cr = Number(p?.additional?.time?.crtime ?? 0)
-  if (cr) return cr
-  return Number(p?.additional?.time?.mtime ?? 0)
+  const cached = timeCache.get(p)
+  if (cached !== undefined) return cached
+  // 与服务端排序字段（crtime desc）保持一致，避免分组日期与列表顺序错位：
+  // 先 crtime → 次 mtime → 最后才用文件名解析作为兜底。
+  let t = Number(p?.additional?.time?.crtime ?? 0)
+  if (!t) t = Number(p?.additional?.time?.mtime ?? 0)
+  if (!t) t = parseNameTime(p?.name || '')
+  timeCache.set(p, t)
+  return t
 }
 
 function dateLabel(p: any): string {
+  const cached = dateCache.get(p)
+  if (cached !== undefined) return cached
   const t = photoTime(p)
-  if (!t) return '未知日期'
-  const d = new Date(t * 1000)
-  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`
+  const label = !t
+    ? '未知日期'
+    : (() => {
+        const d = new Date(t * 1000)
+        return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`
+      })()
+  dateCache.set(p, label)
+  return label
 }
 
-const flatPhotos = computed(() => {
-  const arr = [...photos.value]
-  arr.sort((a, b) => {
-    const ta = photoTime(a)
-    const tb = photoTime(b)
-    if (!ta && !tb) return 0
-    if (!ta) return 1
-    if (!tb) return -1
-    return tb - ta
-  })
-  return arr
-})
+// 服务端已按 crtime desc 返回，前端不再排序，仅为后续分组使用。
+// 该 computed 代价接近零（仅复制数组引用），其他上下文依赖 flatPhotos 的逗号不变。
+const flatPhotos = computed(() => photos.value)
 
 // ─── Layout segments ──────────────────────────────────────
 type Segment =
@@ -108,6 +119,12 @@ type Segment =
   | { type: 'row'; key: string; photos: any[]; offset: number; height: number }
 
 const segments = computed<Segment[]>(() => {
+  // 扫描进行中不构建 segments：限频刷新的 photos 会令本 computed 反复
+  // 重算（万级数据下每次 50ms+），且行 segment 的 key 会随 photos 插入变化，
+  // 导致 LazyThumb 被销毁重建、缩略图重复请求与主线程持续卡顿。
+  // 扫描完成后一次性构建即可。
+  if (loading.value) return []
+
   const cols = colCount.value
   const cell = cellSize.value
   const all = flatPhotos.value
@@ -167,15 +184,27 @@ const visibleSegments = computed(() => {
   )
 })
 
+// 仅提取 header 子集，以在 floatingDate 中二分查找，避免每次滚动都遍历全量 segments。
+const headerSegs = computed(() =>
+  segments.value.filter((s): s is Extract<Segment, { type: 'header' }> => s.type === 'header'),
+)
+
 const floatingDate = computed(() => {
-  const st = scrollTop.value
-  const segs = segments.value
-  let last = ''
-  for (const s of segs) {
-    if (s.type === 'header') last = s.date
-    if (s.offset > st + 60) break
+  const target = scrollTop.value + 60
+  const hs = headerSegs.value
+  if (!hs.length) return ''
+  // 二分查找：找到最大的 offset <= target 的 header
+  let lo = 0, hi = hs.length - 1, idx = -1
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1
+    if (hs[mid].offset <= target) {
+      idx = mid
+      lo = mid + 1
+    } else {
+      hi = mid - 1
+    }
   }
-  return last
+  return idx >= 0 ? hs[idx].date : ''
 })
 
 // ─── Scroll handling ──────────────────────────────────────
@@ -216,7 +245,11 @@ watch(() => dsm.baseUrl, () => { onBaseUrlChange() })
 
 // ─── Thumbnail / viewer ──────────────────────────────────
 function thumbOf(p: any) {
-  return dsm.mediaUrl('thumb', p.path, { size: 'small' })
+  const cached = thumbCache.get(p)
+  if (cached) return cached
+  const u = dsm.mediaUrl('thumb', p.path, { size: 'small' })
+  thumbCache.set(p, u)
+  return u
 }
 function fullOf(p: any) {
   return dsm.mediaUrl('stream', p.path)
@@ -322,9 +355,16 @@ onBeforeUnmount(() => {
       </div>
 
       <template v-else>
+        <!-- 扫描进行中只显示进度，不渲染网格，避免指数级 DOM patch 阻塞主线程 -->
+        <div v-if="loading" class="scan-progress">
+          <el-icon class="is-loading" :size="32"><Loading /></el-icon>
+          <div style="margin-top:12px">扫描中，已发现 {{ photos.length }} 张照片…</div>
+          <div class="hint">扫描完成后会一次性渲染网格</div>
+        </div>
+
         <!-- 浮动日期指示器 -->
         <div
-          v-if="floatingDate && floatingDateVisible && flatPhotos.length > 0"
+          v-if="!loading && floatingDate && floatingDateVisible && flatPhotos.length > 0"
           class="floating-date"
         >{{ floatingDate }}</div>
 
@@ -464,6 +504,18 @@ onBeforeUnmount(() => {
 }
 
 .empty { text-align: center; padding: 48px 0; color: var(--el-text-color-secondary); font-size: 13px; }
+
+.scan-progress {
+  text-align: center;
+  padding: 64px 0;
+  color: var(--el-text-color-secondary);
+  font-size: 14px;
+}
+.scan-progress .hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+}
 
 /* 浮动日期指示器 */
 .floating-date {
