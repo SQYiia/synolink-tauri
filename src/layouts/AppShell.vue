@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { dsm, setSessionRecoverer } from '../api/dsm'
@@ -105,6 +105,17 @@ const tabs = [
   { to: '/app/vmm', label: '虚拟机', icon: 'Monitor' },
   { to: '/app/me', label: '我的', icon: 'User' },
 ]
+
+const mobileTabs = [
+  { to: '/app/dashboard', label: '首页', icon: 'HomeFilled' },
+  { to: '/app/me', label: '我的', icon: 'User' },
+]
+
+const isMobile = ref(window.innerWidth <= 640)
+function onResize() { isMobile.value = window.innerWidth <= 640 }
+onMounted(() => window.addEventListener('resize', onResize))
+onUnmounted(() => window.removeEventListener('resize', onResize))
+const visibleTabs = computed(() => isMobile.value ? mobileTabs : tabs)
 </script>
 
 <template>
@@ -112,7 +123,7 @@ const tabs = [
     <aside class="sidebar">
       <div class="sidebar-nav">
         <RouterLink
-          v-for="t in tabs"
+          v-for="t in visibleTabs"
           :key="t.to"
           :to="t.to"
           class="nav-item"

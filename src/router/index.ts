@@ -10,7 +10,8 @@ const routes = [
     path: '/app',
     component: () => import('../layouts/AppShell.vue'),
     children: [
-      { path: '', redirect: '/app/files' },
+      { path: '', redirect: '/app/dashboard' },
+      { path: 'dashboard', component: () => import('../views/Dashboard.vue') },
       { path: 'files', component: () => import('../views/Files.vue') },
       { path: 'album', component: () => import('../views/Album.vue') },
       { path: 'videos', component: () => import('../views/Videos.vue') },

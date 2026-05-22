@@ -101,7 +101,8 @@
       "Bash(curl -sIL -o /dev/null -w \"%{http_code} \" \"https://global.download.synology.com/download/Document/Software/DeveloperGuide/Package/ContainerManager/All/enu/Synology_Container_Manager_API_Guide.pdf\")",
       "Bash(xargs cat)",
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(grep *)"
     ]
   }
 }
