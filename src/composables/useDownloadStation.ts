@@ -71,21 +71,39 @@ export const dsAvailable = computed(() => state.available)
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
+let probed = false
+
+async function probeAvailability(): Promise<boolean> {
+  if (probed) return state.available
+  probed = true
+  try {
+    const res = await dsm.dsInfo()
+    if (res.success) {
+      state.available = true
+      return true
+    }
+    const code = res.error?.code
+    if (code === 102 || code === 103) {
+      state.available = false
+      return false
+    }
+    state.available = true
+    return true
+  } catch {
+    return true
+  }
+}
+
 export async function dsRefresh() {
   state.loading = true
   try {
+    if (!(await probeAvailability())) return
     const [taskRes, statRes] = await Promise.all([
       dsm.dsTaskList(),
       dsm.dsStatistic(),
     ])
     if (taskRes.success && taskRes.data) {
       state.tasks = (taskRes.data as any).tasks?.map(mapTask) ?? []
-      state.available = true
-    } else {
-      const code = taskRes.error?.code
-      if (code === 102 || code === 103) {
-        state.available = false
-      }
     }
     if (statRes.success && statRes.data) {
       state.statistic.speedDownload = (statRes.data as any).speed_download ?? 0

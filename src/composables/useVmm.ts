@@ -13,6 +13,26 @@ export interface VmmGuest {
   storageName: string
 }
 
+export interface VmmHost {
+  hostId: string
+  hostName: string
+  status: string
+  totalCpu: number
+  freeCpu: number
+  totalRam: number
+  freeRam: number
+}
+
+export interface VmmStorage {
+  storageId: string
+  storageName: string
+  hostName: string
+  status: string
+  size: number
+  used: number
+  volumePath: string
+}
+
 const STATUS_LABELS: Record<string, { label: string; type: string }> = {
   running: { label: '运行中', type: 'success' },
   shutdown: { label: '已关机', type: 'info' },
@@ -46,13 +66,41 @@ function mapGuest(raw: any): VmmGuest {
   }
 }
 
+function mapHost(raw: any): VmmHost {
+  return {
+    hostId: raw.host_id ?? '',
+    hostName: raw.host_name ?? '',
+    status: raw.status ?? 'unknown',
+    totalCpu: raw.total_cpu_core ?? 0,
+    freeCpu: raw.free_cpu_core ?? 0,
+    totalRam: raw.total_ram_size ?? 0,
+    freeRam: raw.free_ram_size ?? 0,
+  }
+}
+
+function mapStorage(raw: any): VmmStorage {
+  return {
+    storageId: raw.storage_id ?? '',
+    storageName: raw.storage_name ?? '',
+    hostName: raw.host_name ?? '',
+    status: raw.status ?? 'unknown',
+    size: raw.size ?? 0,
+    used: raw.used ?? 0,
+    volumePath: raw.volume_path ?? '',
+  }
+}
+
 const state = reactive({
   guests: [] as VmmGuest[],
+  hosts: [] as VmmHost[],
+  storages: [] as VmmStorage[],
   loading: false,
   available: true,
 })
 
 export const vmmGuests = computed(() => state.guests)
+export const vmmHosts = computed(() => state.hosts)
+export const vmmStorages = computed(() => state.storages)
 export const vmmLoading = computed(() => state.loading)
 export const vmmAvailable = computed(() => state.available)
 
@@ -61,15 +109,26 @@ let pollTimer: ReturnType<typeof setInterval> | null = null
 export async function vmmRefresh() {
   state.loading = true
   try {
-    const res = await dsm.vmmGuestList()
-    if (res.success && res.data) {
-      state.guests = ((res.data as any).guests ?? []).map(mapGuest)
+    const [guestRes, hostRes, storageRes] = await Promise.all([
+      dsm.vmmGuestList(),
+      dsm.vmmHostList(),
+      dsm.vmmStorageList(),
+    ])
+    if (guestRes.success && guestRes.data) {
+      state.guests = ((guestRes.data as any).guests ?? []).map(mapGuest)
       state.available = true
     } else {
-      const code = res.error?.code
+      const code = guestRes.error?.code
       if (code === 102 || code === 103) {
         state.available = false
+        return
       }
+    }
+    if (hostRes.success && hostRes.data) {
+      state.hosts = ((hostRes.data as any).hosts ?? []).map(mapHost)
+    }
+    if (storageRes.success && storageRes.data) {
+      state.storages = ((storageRes.data as any).storages ?? []).map(mapStorage)
     }
   } catch {
     // network error
@@ -128,6 +187,8 @@ export function useVmm() {
 
   return {
     guests: vmmGuests,
+    hosts: vmmHosts,
+    storages: vmmStorages,
     loading: vmmLoading,
     available: vmmAvailable,
     startPolling: vmmStartPolling,

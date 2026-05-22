@@ -631,6 +631,16 @@ export class DsmClient {
       params: { guest_id: guestId },
     })
   }
+
+  /** VMM 存储列表 */
+  async vmmStorageList() {
+    return this.entry('SYNO.Virtualization.API.Storage', 'list')
+  }
+
+  /** VMM 网络列表 */
+  async vmmNetworkList() {
+    return this.entry('SYNO.Virtualization.API.Network', 'list')
+  }
 }
 
 /** 单例 */

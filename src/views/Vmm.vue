@@ -3,10 +3,20 @@ import { onMounted } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { useVmm, getVmmStatusLabel, type VmmGuest } from '../composables/useVmm'
 
-const { guests, loading, available, startPolling, refresh, powerOn, shutdown, powerOff } = useVmm()
+const { guests, hosts, storages, loading, available, startPolling, refresh, powerOn, shutdown, powerOff } = useVmm()
 
 function isTransitioning(status: string) {
   return ['booting', 'shutting_down', 'moving', 'stor_migrating', 'creating', 'importing', 'preparing'].includes(status)
+}
+
+function autorunLabel(v: number) {
+  if (v === 2) return '自动开机'
+  if (v === 1) return '上次状态'
+  return '手动'
+}
+
+function storagePct(s: { size: number; used: number }) {
+  return s.size ? Math.round((s.used / s.size) * 100) : 0
 }
 
 async function handlePowerOn(guest: VmmGuest) {
@@ -53,51 +63,106 @@ onMounted(() => {
         </el-button>
       </div>
 
-      <!-- 卡片网格 -->
-      <div v-if="guests.length" class="vmm-grid">
-        <div v-for="g in guests" :key="g.guestId" class="vmm-card">
-          <div class="vmm-card-header">
-            <span class="vmm-card-name">{{ g.guestName }}</span>
-            <el-tag :type="getVmmStatusLabel(g.status).type as any" size="small" disable-transitions>
-              {{ getVmmStatusLabel(g.status).label }}
-            </el-tag>
-          </div>
-          <div class="vmm-card-info">
-            <span>{{ g.vcpuNum }} vCPU</span>
-            <span>{{ g.vramSize }} MB</span>
-            <span v-if="g.storageName">{{ g.storageName }}</span>
-          </div>
-          <div v-if="g.description" class="vmm-card-desc">{{ g.description }}</div>
-          <div class="vmm-card-actions">
-            <el-button
-              v-if="g.status === 'shutdown'"
-              size="small"
-              type="success"
-              @click="handlePowerOn(g)"
-            >开机</el-button>
-            <el-button
-              v-if="g.status === 'running'"
-              size="small"
-              type="warning"
-              @click="handleShutdown(g)"
-            >关机</el-button>
-            <el-button
-              v-if="g.status === 'running'"
-              size="small"
-              type="danger"
-              @click="handlePowerOff(g)"
-            >强制关机</el-button>
-            <span v-if="isTransitioning(g.status)" class="vmm-card-wait">
-              <el-icon class="is-loading"><Loading /></el-icon>
-            </span>
+      <!-- 主机信息 -->
+      <div v-if="hosts.length" class="vmm-section">
+        <div class="vmm-section-title">主机</div>
+        <div class="vmm-host-grid">
+          <div v-for="h in hosts" :key="h.hostId" class="vmm-host-card">
+            <div class="vmm-host-head">
+              <span class="vmm-host-name">{{ h.hostName }}</span>
+              <el-tag :type="h.status === 'running' ? 'success' : 'danger'" size="small" disable-transitions>
+                {{ h.status === 'running' ? '在线' : h.status }}
+              </el-tag>
+            </div>
+            <div class="vmm-host-stats">
+              <div class="vmm-host-stat">
+                <span class="vmm-host-stat-label">CPU</span>
+                <span class="vmm-host-stat-val">{{ h.totalCpu - h.freeCpu }} / {{ h.totalCpu }} 核</span>
+              </div>
+              <div class="vmm-host-stat">
+                <span class="vmm-host-stat-label">内存</span>
+                <span class="vmm-host-stat-val">{{ Math.round((h.totalRam - h.freeRam) / 1024 * 10) / 10 }} / {{ Math.round(h.totalRam / 1024 * 10) / 10 }} GB</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- 空状态 -->
-      <div v-else class="vmm-empty">
-        <el-icon :size="36"><Monitor /></el-icon>
-        <p>暂无虚拟机</p>
+      <!-- 虚拟机列表 -->
+      <div class="vmm-section">
+        <div class="vmm-section-title">虚拟机 ({{ guests.length }})</div>
+        <div v-if="guests.length" class="vmm-grid">
+          <div v-for="g in guests" :key="g.guestId" class="vmm-card">
+            <div class="vmm-card-header">
+              <div class="vmm-card-status-dot" :class="g.status === 'running' ? 'dot-on' : g.status === 'shutdown' ? 'dot-off' : 'dot-warn'"></div>
+              <span class="vmm-card-name">{{ g.guestName }}</span>
+              <el-tag :type="getVmmStatusLabel(g.status).type as any" size="small" disable-transitions>
+                {{ getVmmStatusLabel(g.status).label }}
+              </el-tag>
+            </div>
+            <div class="vmm-card-info">
+              <div class="vmm-card-spec">
+                <span>{{ g.vcpuNum }} vCPU</span>
+                <span>{{ g.vramSize >= 1024 ? (g.vramSize / 1024).toFixed(1) + ' GB' : g.vramSize + ' MB' }}</span>
+              </div>
+              <div class="vmm-card-meta">
+                <span v-if="g.storageName">{{ g.storageName }}</span>
+                <span>{{ autorunLabel(g.autorun) }}</span>
+              </div>
+            </div>
+            <div v-if="g.description" class="vmm-card-desc">{{ g.description }}</div>
+            <div class="vmm-card-actions">
+              <el-button
+                v-if="g.status === 'shutdown' || g.status === 'crashed'"
+                size="small"
+                type="success"
+                @click="handlePowerOn(g)"
+              >开机</el-button>
+              <el-button
+                v-if="g.status === 'running'"
+                size="small"
+                type="warning"
+                @click="handleShutdown(g)"
+              >关机</el-button>
+              <el-button
+                v-if="g.status === 'running'"
+                size="small"
+                type="danger"
+                plain
+                @click="handlePowerOff(g)"
+              >强制关机</el-button>
+              <span v-if="isTransitioning(g.status)" class="vmm-card-wait">
+                <el-icon class="is-loading"><Loading /></el-icon>
+                <span style="font-size: 12px; margin-left: 4px">处理中…</span>
+              </span>
+            </div>
+          </div>
+        </div>
+        <div v-else class="vmm-empty">
+          <el-icon :size="36"><Monitor /></el-icon>
+          <p>暂无虚拟机</p>
+        </div>
+      </div>
+
+      <!-- 存储信息 -->
+      <div v-if="storages.length" class="vmm-section">
+        <div class="vmm-section-title">VMM 存储</div>
+        <div class="vmm-storage-list">
+          <div v-for="s in storages" :key="s.storageId" class="vmm-storage-card">
+            <div class="vmm-storage-head">
+              <span class="vmm-storage-name">{{ s.storageName }}</span>
+              <el-tag :type="s.status === 'online' ? 'success' : 'danger'" size="small" disable-transitions>
+                {{ s.status === 'online' ? '在线' : s.status }}
+              </el-tag>
+            </div>
+            <div class="vmm-storage-bar">
+              <div class="vmm-storage-fill" :style="{ width: storagePct(s) + '%' }"></div>
+            </div>
+            <div class="vmm-storage-detail">
+              {{ s.used ? (s.used / 1024).toFixed(1) : 0 }} / {{ (s.size / 1024).toFixed(1) }} GB · {{ s.volumePath }}
+            </div>
+          </div>
+        </div>
       </div>
     </template>
   </div>
@@ -110,6 +175,7 @@ onMounted(() => {
   height: 100%;
   padding: 16px 20px;
   gap: 12px;
+  overflow: auto;
 }
 .vmm-unavailable {
   display: flex;
@@ -141,15 +207,46 @@ onMounted(() => {
   color: var(--el-text-color-primary);
 }
 
-.vmm-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 14px;
-  flex: 1;
-  overflow: auto;
-  align-content: start;
+.vmm-section { margin-top: 4px; }
+.vmm-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 8px;
 }
 
+/* 主机卡片 */
+.vmm-host-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+}
+.vmm-host-card {
+  padding: 12px 14px;
+  background: var(--sl-bg-card);
+  border: var(--sl-border);
+  border-radius: var(--sl-radius-sm);
+}
+.vmm-host-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.vmm-host-name { font-size: 14px; font-weight: 600; color: var(--el-text-color-primary); }
+.vmm-host-stats { display: flex; flex-direction: column; gap: 4px; }
+.vmm-host-stat { display: flex; justify-content: space-between; font-size: 12px; }
+.vmm-host-stat-label { color: var(--el-text-color-secondary); }
+.vmm-host-stat-val { color: var(--el-text-color-primary); font-weight: 500; }
+
+/* 虚拟机卡片 */
+.vmm-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
 .vmm-card {
   border: var(--sl-border);
   border-radius: var(--sl-radius-sm);
@@ -162,17 +259,35 @@ onMounted(() => {
 .vmm-card-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
 }
+.vmm-card-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.dot-on { background: #10B981; box-shadow: 0 0 6px rgba(16, 185, 129, 0.4); }
+.dot-off { background: #9CA3AF; }
+.dot-warn { background: #F59E0B; }
 .vmm-card-name {
   font-size: 14px;
   font-weight: 600;
   color: var(--el-text-color-primary);
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.vmm-card-info {
+.vmm-card-info { display: flex; flex-direction: column; gap: 4px; }
+.vmm-card-spec {
+  display: flex;
+  gap: 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--el-text-color-primary);
+}
+.vmm-card-meta {
   display: flex;
   gap: 12px;
   font-size: 12px;
@@ -192,8 +307,39 @@ onMounted(() => {
   margin-top: 4px;
 }
 .vmm-card-wait {
+  display: flex;
+  align-items: center;
   color: var(--el-text-color-secondary);
 }
+
+/* 存储 */
+.vmm-storage-list { display: flex; flex-direction: column; gap: 8px; }
+.vmm-storage-card {
+  background: var(--sl-bg-card);
+  border-radius: var(--sl-radius-sm);
+  padding: 10px 14px;
+  border: var(--sl-border);
+}
+.vmm-storage-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.vmm-storage-name { font-weight: 500; font-size: 13px; color: var(--el-text-color-primary); }
+.vmm-storage-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--el-fill-color);
+  overflow: hidden;
+}
+.vmm-storage-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--sl-primary);
+  transition: width var(--sl-transition-slow);
+}
+.vmm-storage-detail { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 6px; }
 
 .vmm-empty {
   display: flex;
@@ -201,7 +347,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  padding: 80px 0;
+  padding: 60px 0;
   color: var(--el-text-color-secondary);
   font-size: 13px;
 }
@@ -211,12 +357,8 @@ onMounted(() => {
     padding: 12px 12px;
     gap: 10px;
   }
-  .vmm-grid {
+  .vmm-grid, .vmm-host-grid {
     grid-template-columns: 1fr;
-    gap: 10px;
-  }
-  .vmm-card {
-    padding: 12px 14px;
   }
   .vmm-card-actions {
     flex-wrap: wrap;
