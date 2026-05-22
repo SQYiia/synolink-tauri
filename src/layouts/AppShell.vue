@@ -102,6 +102,7 @@ const tabs = [
   { to: '/app/album', label: '相册', icon: 'Picture' },
   { to: '/app/videos', label: '视频', icon: 'VideoCamera' },
   { to: '/app/downloads', label: '下载站', icon: 'Connection' },
+  { to: '/app/vmm', label: '虚拟机', icon: 'Monitor' },
   { to: '/app/me', label: '我的', icon: 'User' },
 ]
 </script>

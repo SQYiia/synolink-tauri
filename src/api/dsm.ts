@@ -589,6 +589,48 @@ export class DsmClient {
   async dsBTSearchModules() {
     return this.entry('SYNO.DownloadStation.BTSearch', 'getModule')
   }
+
+  // ─── VMM (Virtual Machine Manager) ───────────────────────────────
+
+  /** 列出主机 */
+  async vmmHostList() {
+    return this.entry('SYNO.Virtualization.API.Host', 'list')
+  }
+
+  /** 列出虚拟机 */
+  async vmmGuestList(additional = true) {
+    return this.entry('SYNO.Virtualization.API.Guest', 'list', {
+      params: { additional },
+    })
+  }
+
+  /** 获取指定虚拟机信息 */
+  async vmmGuestGet(opts: { guest_id?: string; guest_name?: string }) {
+    return this.entry('SYNO.Virtualization.API.Guest', 'get', {
+      params: { ...opts, additional: true },
+    })
+  }
+
+  /** 虚拟机开机 */
+  async vmmGuestPowerOn(guestId: string) {
+    return this.entry('SYNO.Virtualization.API.Guest.Action', 'poweron', {
+      params: { guest_id: guestId },
+    })
+  }
+
+  /** 虚拟机正常关机 */
+  async vmmGuestShutdown(guestId: string) {
+    return this.entry('SYNO.Virtualization.API.Guest.Action', 'shutdown', {
+      params: { guest_id: guestId },
+    })
+  }
+
+  /** 虚拟机强制关机 */
+  async vmmGuestPowerOff(guestId: string) {
+    return this.entry('SYNO.Virtualization.API.Guest.Action', 'poweroff', {
+      params: { guest_id: guestId },
+    })
+  }
 }
 
 /** 单例 */

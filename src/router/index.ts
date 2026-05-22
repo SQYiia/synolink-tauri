@@ -15,6 +15,7 @@ const routes = [
       { path: 'album', component: () => import('../views/Album.vue') },
       { path: 'videos', component: () => import('../views/Videos.vue') },
       { path: 'downloads', component: () => import('../views/Downloads.vue') },
+      { path: 'vmm', component: () => import('../views/Vmm.vue') },
       { path: 'me', component: () => import('../views/Me.vue') },
     ],
   },
