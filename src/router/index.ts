@@ -14,6 +14,7 @@ const routes = [
       { path: 'files', component: () => import('../views/Files.vue') },
       { path: 'album', component: () => import('../views/Album.vue') },
       { path: 'videos', component: () => import('../views/Videos.vue') },
+      { path: 'downloads', component: () => import('../views/Downloads.vue') },
       { path: 'me', component: () => import('../views/Me.vue') },
     ],
   },

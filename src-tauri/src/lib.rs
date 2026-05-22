@@ -165,12 +165,10 @@ async fn download_to_file(
         Err(_) => 0,
     };
 
-    // DSM 7+ 要求 path 为 JSON 数组格式 ["path"]，裸字符串会返回 119 错误
-    let path_json = serde_json::to_string(&[&path]).unwrap_or_else(|_| format!("[\"{}\"]", path));
     let url = format!(
-        "{}/webapi/entry.cgi?api=SYNO.FileStation.Download&version=2&method=download&mode=%22open%22&path={}&_sid={}",
+        "{}/webapi/entry.cgi?api=SYNO.FileStation.Download&version=2&method=download&mode=open&path={}&_sid={}",
         session.base_url,
-        encode_path(&path_json),
+        encode_path(&path),
         session.sid,
     );
 
@@ -422,13 +420,12 @@ async fn proxy(
         return Err("missing path".into());
     }
 
-    let path_json = serde_json::to_string(&[&path]).unwrap_or_else(|_| format!("[\"{}\"]", path));
     let (target, is_stream) = match kind {
         "/stream" => (
             format!(
-                "{}/webapi/entry.cgi?api=SYNO.FileStation.Download&version=2&method=download&mode=%22open%22&path={}&_sid={}",
+                "{}/webapi/entry.cgi?api=SYNO.FileStation.Download&version=2&method=download&mode=open&path={}&_sid={}",
                 session.base_url,
-                encode_path(&path_json),
+                encode_path(&path),
                 session.sid,
             ),
             true,

@@ -20,6 +20,7 @@ const diskWrite = ref(0)
 const volumes = ref<any[]>([])
 const disks = ref<any[]>([])
 const sharesCount = ref(0)
+const apisCount = ref(0)
 const lastUpdate = ref('')
 
 // 历史趋势数据（最近60个采样点 = 5分钟 @5s间隔）
@@ -53,6 +54,7 @@ onMounted(async () => {
     router.replace('/servers')
     return
   }
+  apisCount.value = Object.keys(dsm.apiInfo).length
   await refreshAll()
   timer = setInterval(refreshUtil, 5000)
 })
@@ -262,6 +264,7 @@ function switchServer() {
     <div class="section-title"><span>ACCOUNT</span></div>
     <div class="info-card">
       <div class="info-row"><span>共享文件夹</span><b>{{ sharesCount }}</b></div>
+      <div class="info-row"><span>可用 API</span><b>{{ apisCount }}</b></div>
       <div class="info-row"><span>SynoToken</span><b>{{ dsm.synoToken ? '已注入' : '未下发' }}</b></div>
     </div>
 

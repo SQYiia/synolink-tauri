@@ -38,11 +38,9 @@ function onSortChange({ prop, order }: { prop: string; order: string | null }) {
 const crumbs = ref<string[]>([])
 const uploadInput = ref<HTMLInputElement | null>(null)
 
-// 缩略图 LRU 缓存
-const THUMB_CACHE_MAX = 500
-const thumbCache = new Map<string, string>()
+// 缩略图：path -> blob URL
 const thumbs = ref<Record<string, string>>({})
-let thumbGen = 0
+let thumbGen = 0 // 防止旧请求覆盖新目录
 
 // 搜索
 const searchPattern = ref('')
@@ -105,6 +103,7 @@ async function onCopyMoveConfirm(dest: string) {
       ElMessage.error(`操作失败 code=${res.error?.code}`)
       return
     }
+    // 轮询等待任务完成
     const taskid = res.data.taskid
     const MAX_WAIT = 60000
     const POLL = 1000
@@ -327,6 +326,7 @@ async function doDelete(row: any) {
 
 function doDownload(row: any) {
   enqueue(row.path, row.name, Number(row.additional?.size || 0))
+  ElMessage.success(`已添加「${row.name}」到下载队列`)
 }
 
 function triggerUpload() {
@@ -410,11 +410,13 @@ async function preview(row: any) {
     ElMessage.info('该类型暂不支持预览，可改为下载')
     return
   }
+  // 视频/音频优先用 dsm:// 流式播放，避免整文件载入内存
   if (previewType.value === 'video' || previewType.value === 'audio') {
     previewSrc.value = dsm.mediaUrl('stream', row.path)
     previewOpen.value = true
     return
   }
+  // 大文件保护：文本 > 5MB、图片 > 20MB 时提示
   const fileSize = Number(row.additional?.size ?? 0)
   const TEXT_LIMIT = 5 * 1024 * 1024
   const IMAGE_LIMIT = 20 * 1024 * 1024
@@ -431,6 +433,7 @@ async function preview(row: any) {
       const decoder = new TextDecoder('utf-8', { fatal: false })
       previewText.value = decoder.decode(buf)
     } else {
+      // image
       const blob = new Blob([buf], { type: 'image/*' })
       previewSrc.value = URL.createObjectURL(blob)
     }
@@ -461,57 +464,31 @@ function isThumbable(row: any): boolean {
   return t === 'image' || t === 'video'
 }
 
-function thumbCacheGet(p: string): string | undefined {
-  const url = thumbCache.get(p)
-  if (url) {
-    thumbCache.delete(p)
-    thumbCache.set(p, url)
+function revokeThumbs() {
+  for (const url of Object.values(thumbs.value)) {
+    try { URL.revokeObjectURL(url) } catch {}
   }
-  return url
-}
-
-function thumbCacheSet(p: string, url: string) {
-  if (thumbCache.size >= THUMB_CACHE_MAX) {
-    const oldest = thumbCache.keys().next().value!
-    const oldUrl = thumbCache.get(oldest)!
-    thumbCache.delete(oldest)
-    try { URL.revokeObjectURL(oldUrl) } catch {}
-  }
-  thumbCache.set(p, url)
+  thumbs.value = {}
 }
 
 async function loadThumbs(rows: any[], gen: number) {
-  const currentThumbs: Record<string, string> = {}
-  const toFetch: string[] = []
-
-  for (const r of rows) {
-    if (!isThumbable(r)) continue
-    const p = r.path as string
-    if (!p) continue
-    const cached = thumbCacheGet(p)
-    if (cached) {
-      currentThumbs[p] = cached
-    } else {
-      toFetch.push(p)
-    }
-  }
-
-  thumbs.value = currentThumbs
-
+  const targets = rows
+    .filter(isThumbable)
+    .map((r) => r.path as string)
+    .filter((p) => p && !thumbs.value[p])
   const concurrency = 4
   let idx = 0
-  const workers = Array.from({ length: Math.min(concurrency, toFetch.length) }, async () => {
-    while (idx < toFetch.length) {
-      const p = toFetch[idx++]
+  const workers = Array.from({ length: Math.min(concurrency, targets.length) }, async () => {
+    while (idx < targets.length) {
+      const p = targets[idx++]
       if (gen !== thumbGen) return
       try {
         const buf = await dsm.thumbBytes(p, 'small')
         if (gen !== thumbGen) return
+        // 大小太小通常是 DSM 返回的 JSON 错误，跳过
         if (!buf || buf.byteLength < 64) continue
         const blob = new Blob([buf], { type: 'image/jpeg' })
-        const url = URL.createObjectURL(blob)
-        thumbCacheSet(p, url)
-        thumbs.value = { ...thumbs.value, [p]: url }
+        thumbs.value[p] = URL.createObjectURL(blob)
       } catch {}
     }
   })
@@ -519,13 +496,13 @@ async function loadThumbs(rows: any[], gen: number) {
 }
 
 watch(items, (rows) => {
+  revokeThumbs()
   thumbGen++
   if (rows && rows.length) void loadThumbs(rows, thumbGen)
-  else thumbs.value = {}
 })
 
 onUnmounted(() => {
-  // 不清理 thumbCache — 留给下次进入复用
+  revokeThumbs()
 })
 
 function sortByName(a: any, b: any) {
@@ -538,15 +515,6 @@ function sortBySize(a: any, b: any) {
 
 function sortByTime(a: any, b: any) {
   return (Number(a.additional?.time?.mtime) || 0) - (Number(b.additional?.time?.mtime) || 0)
-}
-
-function handleCommand(cmd: string, row: any) {
-  switch (cmd) {
-    case 'copy': startCopyMove('copy', [row.path]); break
-    case 'move': startCopyMove('move', [row.path]); break
-    case 'rename': doRename(row); break
-    case 'delete': doDelete(row); break
-  }
 }
 </script>
 
@@ -637,25 +605,14 @@ function handleCommand(cmd: string, row: any) {
             <span v-if="row.additional?.time?.mtime">{{ new Date(row.additional.time.mtime * 1000).toLocaleString() }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="360" fixed="right">
           <template #default="{ row }">
             <el-button v-if="!isRowDir(row)" size="small" @click="preview(row)">预览</el-button>
             <el-button v-if="!isRowDir(row)" size="small" @click="doDownload(row)">下载</el-button>
-            <el-dropdown trigger="click" @command="(cmd: string) => handleCommand(cmd, row)">
-              <el-button size="small">
-                更多<el-icon class="el-icon--right"><ArrowDown /></el-icon>
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="copy">复制到…</el-dropdown-item>
-                  <el-dropdown-item command="move">移动到…</el-dropdown-item>
-                  <el-dropdown-item command="rename">重命名</el-dropdown-item>
-                  <el-dropdown-item command="delete" divided>
-                    <span style="color: var(--el-color-danger)">删除</span>
-                  </el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
+            <el-button size="small" @click="startCopyMove('copy', [row.path])">复制</el-button>
+            <el-button size="small" @click="startCopyMove('move', [row.path])">移动</el-button>
+            <el-button size="small" @click="doRename(row)">重命名</el-button>
+            <el-button size="small" type="danger" @click="doDelete(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>

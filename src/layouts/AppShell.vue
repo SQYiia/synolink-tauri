@@ -11,6 +11,7 @@ const router = useRouter()
 const app = useAppStore()
 const booting = ref(true)
 
+// 全局搜索
 const globalSearchOpen = ref(false)
 const globalSearchQuery = ref('')
 const globalSearchResults = ref<any[]>([])
@@ -51,22 +52,23 @@ async function doGlobalSearch() {
 
 function goToResult(item: any) {
   globalSearchOpen.value = false
+  // Navigate to Files view with the folder of the result
   const filePath = item.path as string
   const folder = filePath.substring(0, filePath.lastIndexOf('/')) || '/'
   router.push({ path: '/app/files', query: { open: folder } })
 }
 
+/** 根据当前保存的账户 重建 DSM 会话；返回是否成功。 */
 async function reloginFromStore(): Promise<boolean> {
   const acc = app.accounts.find(a => a.id === app.currentAccountId)
   const srv = app.servers.find(s => s.id === app.currentServerId)
   if (!acc || !srv) return false
   dsm.baseUrl = `${srv.protocol}://${srv.host}:${srv.port}`
-  dsm.skipTlsVerify = srv.skipTlsVerify !== false
   try {
     if (!Object.keys(dsm.apiInfo).length) {
       await dsm.loadApiInfo()
     }
-    const res = await dsm.login({ account: acc.account, passwd: app.getPassword(acc) })
+    const res = await dsm.login({ account: acc.account, passwd: acc.password })
     return !!res.success
   } catch {
     return false
@@ -75,8 +77,10 @@ async function reloginFromStore(): Promise<boolean> {
 
 onMounted(async () => {
   await app.load()
+  // 注册全局会话恢复器：dsm.request 遇到 code=119 会自动回调
   setSessionRecoverer(reloginFromStore)
 
+  // 刷新 / 重启后单例被重置，自动重建会话
   if (!dsm.sid) {
     if (!app.currentAccountId || !app.currentServerId) {
       router.replace('/servers')
@@ -97,6 +101,7 @@ const tabs = [
   { to: '/app/files', label: '文件', icon: 'Folder' },
   { to: '/app/album', label: '相册', icon: 'Picture' },
   { to: '/app/videos', label: '视频', icon: 'VideoCamera' },
+  { to: '/app/downloads', label: '下载站', icon: 'Connection' },
   { to: '/app/me', label: '我的', icon: 'User' },
 ]
 </script>
