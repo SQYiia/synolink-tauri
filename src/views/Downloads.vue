@@ -23,6 +23,9 @@ const btResults = ref<any[]>([])
 const btTaskId = ref('')
 const btFinished = ref(false)
 
+const isMobile = computed(() => typeof window !== 'undefined' && window.innerWidth <= 640)
+const dialogWidth = computed(() => isMobile.value ? '92%' : '500px')
+const dialogWidthLg = computed(() => isMobile.value ? '95%' : '640px')
 const selectedIds = computed(() => selected.value.map(t => t.id))
 
 function progress(t: DSTask) {
@@ -287,7 +290,7 @@ onMounted(() => {
     </template>
 
     <!-- 新建任务对话框 -->
-    <el-dialog v-model="createOpen" title="新建下载任务" width="500px" destroy-on-close>
+    <el-dialog v-model="createOpen" title="新建下载任务" :width="dialogWidth" destroy-on-close>
       <el-form label-position="top">
         <el-form-item label="下载链接">
           <el-input
@@ -321,7 +324,7 @@ onMounted(() => {
     </el-dialog>
 
     <!-- BT搜索对话框 -->
-    <el-dialog v-model="btSearchOpen" title="BT 搜索" width="640px" @close="closeBTSearch" destroy-on-close>
+    <el-dialog v-model="btSearchOpen" title="BT 搜索" :width="dialogWidthLg" @close="closeBTSearch" destroy-on-close>
       <div class="bt-search-bar">
         <el-input
           v-model="btKeyword"
@@ -441,4 +444,28 @@ onMounted(() => {
 .bt-search-bar { display: flex; gap: 8px; margin-bottom: 12px; }
 .bt-results { max-height: 450px; overflow-y: auto; }
 .bt-loading-hint { text-align: center; padding: 8px 0; }
+
+@media (max-width: 640px) {
+  .ds-page {
+    padding: 12px 12px;
+    gap: 8px;
+  }
+  .ds-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .ds-header-left {
+    gap: 8px;
+  }
+  .ds-header-right {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .ds-batch {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+}
 </style>

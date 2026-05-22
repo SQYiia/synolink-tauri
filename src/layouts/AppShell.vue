@@ -288,6 +288,45 @@ const tabs = [
   background: var(--sl-primary);
 }
 
+/* Mobile: sidebar → bottom tab bar */
+@media (max-width: 640px) {
+  .app-shell {
+    flex-direction: column-reverse;
+  }
+  .sidebar {
+    width: 100%;
+    flex-direction: row;
+    border-right: none;
+    border-top: var(--sl-border);
+    padding: 0;
+    height: 52px;
+  }
+  .sidebar-nav {
+    flex-direction: row;
+    justify-content: space-around;
+    padding: 0;
+    gap: 0;
+  }
+  .sidebar-bottom {
+    display: none;
+  }
+  .nav-item {
+    margin: 0;
+    padding: 6px 0;
+    flex: 1;
+    border-radius: 0;
+  }
+  .nav-item.active::before {
+    left: 25%;
+    right: 25%;
+    top: 0;
+    bottom: auto;
+    width: auto;
+    height: 2px;
+    border-radius: 0 0 2px 2px;
+  }
+}
+
 /* Content */
 .content {
   flex: 1;

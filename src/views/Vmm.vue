@@ -205,4 +205,21 @@ onMounted(() => {
   color: var(--el-text-color-secondary);
   font-size: 13px;
 }
+
+@media (max-width: 640px) {
+  .vmm-page {
+    padding: 12px 12px;
+    gap: 10px;
+  }
+  .vmm-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .vmm-card {
+    padding: 12px 14px;
+  }
+  .vmm-card-actions {
+    flex-wrap: wrap;
+  }
+}
 </style>
