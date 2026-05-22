@@ -2,6 +2,7 @@ import { reactive, computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
+import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { ElMessage, ElNotification } from 'element-plus'
 import { h } from 'vue'
 
@@ -14,6 +15,8 @@ export interface DownloadTask {
   status: 'queued' | 'downloading' | 'done' | 'error' | 'cancelled'
   error?: string
   savePath?: string
+  /** 任务级别的保存目录，优先于全局 downloadDir */
+  saveDir?: string
 }
 
 const MAX_CONCURRENT = 2
@@ -24,8 +27,17 @@ const state = reactive({
 
 export const downloadQueue = computed(() => state.tasks)
 
-/** 当前下载目录（默认=系统 Downloads）。启动时异步拉取。 */
-export const downloadDir = ref<string>('')
+/** 当前下载目录（默认=系统 Downloads）。启动时优先从 localStorage 读入，避免每次重调原生接口。 */
+const LS_KEY_SAVE_DIR = 'synolink.downloadDir'
+export const downloadDir = ref<string>(localStorage.getItem(LS_KEY_SAVE_DIR) || '')
+
+/** 每次下载前是否弹出目录选择器（默认 ON，用户可在下载抽屉中关闭） */
+const LS_KEY_ASK_EVERY = 'synolink.askEveryDownload'
+export const askEveryDownload = ref<boolean>(localStorage.getItem(LS_KEY_ASK_EVERY) !== '0')
+export function setAskEveryDownload(on: boolean) {
+  askEveryDownload.value = on
+  localStorage.setItem(LS_KEY_ASK_EVERY, on ? '1' : '0')
+}
 
 async function ensureDownloadDir() {
   if (downloadDir.value) return downloadDir.value
@@ -35,6 +47,34 @@ async function ensureDownloadDir() {
     console.warn('[download] get_default_download_dir failed:', e)
   }
   return downloadDir.value
+}
+
+/** 弹出系统目录选择器，选定后更新全局下载目录并持久化。不会影响已在进行中的任务。 */
+export async function chooseDownloadDir(): Promise<string | null> {
+  try {
+    const picked = await openDialog({
+      directory: true,
+      multiple: false,
+      defaultPath: downloadDir.value || undefined,
+      title: '选择下载保存目录',
+    })
+    if (!picked || Array.isArray(picked)) return null
+    downloadDir.value = picked
+    localStorage.setItem(LS_KEY_SAVE_DIR, picked)
+    ElMessage.success('下载目录已更新：' + picked)
+    return picked
+  } catch (e: any) {
+    ElMessage.error('选择目录失败：' + (e?.message ?? e))
+    return null
+  }
+}
+
+/** 恢复为系统默认 Downloads。 */
+export async function resetDownloadDir() {
+  localStorage.removeItem(LS_KEY_SAVE_DIR)
+  downloadDir.value = ''
+  await ensureDownloadDir()
+  ElMessage.success('已恢复默认下载目录：' + downloadDir.value)
 }
 
 /** 打开文件所在目录并高亮选中。某些平台仅能打开目录不能高亮。 */
@@ -106,15 +146,38 @@ async function doSetupListeners() {
   )
 }
 
-export async function enqueue(path: string, name: string, size: number = 0) {
+export async function enqueue(path: string, name: string, size: number = 0, saveDir?: string) {
   await ensureListeners()
+  // 优先级：显式传入的 saveDir > “每次询问”弹选 > 全局 downloadDir > 系统默认
+  let effectiveDir: string | undefined = saveDir?.trim() || undefined
+  if (!effectiveDir && askEveryDownload.value) {
+    try {
+      const picked = await openDialog({
+        directory: true,
+        multiple: false,
+        defaultPath: downloadDir.value || undefined,
+        title: `选择 「${name}」 的保存目录`,
+      })
+      if (!picked || Array.isArray(picked)) {
+        ElMessage.info('已取消下载')
+        return null
+      }
+      effectiveDir = picked
+      // 同时更新全局默认，下次默选该目录
+      downloadDir.value = picked
+      localStorage.setItem(LS_KEY_SAVE_DIR, picked)
+    } catch (e: any) {
+      ElMessage.error('选择目录失败：' + (e?.message ?? e))
+      return null
+    }
+  }
+  if (!effectiveDir) effectiveDir = await ensureDownloadDir()
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  const task: DownloadTask = { id, path, name, size, loaded: 0, status: 'queued' }
+  const task: DownloadTask = { id, path, name, size, loaded: 0, status: 'queued', saveDir: effectiveDir }
   state.tasks.unshift(task)
-  const dir = await ensureDownloadDir()
   ElMessage({
     type: 'info',
-    message: dir ? `已加入下载队列，保存到：${dir}` : '已加入下载队列',
+    message: effectiveDir ? `已加入下载队列，保存到：${effectiveDir}` : '已加入下载队列',
     duration: 2500,
   })
   processQueue()
@@ -161,6 +224,7 @@ async function startDownload(task: DownloadTask) {
     taskId: task.id,
     path: task.path,
     name: task.name,
+    saveDir: task.saveDir || downloadDir.value || null,
   }).catch((e: any) => {
     if (task.status === 'downloading') {
       task.status = 'error'

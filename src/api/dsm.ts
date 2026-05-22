@@ -45,11 +45,27 @@ export interface AuthResult {
  * - 登录成功后自动保存 synotoken，后续请求注入 X-SYNO-TOKEN（doc 1.7）。
  * - Cookie 由 DSM 下发的 Set-Cookie 自动维护（Tauri 会持久 cookie）。
  */
+
+/** Download Station `destination` 必须是**相对于共享文件夹的**路径，如 `Downloads/sub`。
+ *  常见 FolderPicker 会返回 `/Downloads/...` 或 `/volume1/Downloads/...`，这里统一去除前导 `/` 与 `volumeN/`。 */
+function normalizeDsDestination(p?: string): string | undefined {
+  if (!p) return undefined
+  let s = String(p).trim().replace(/\\/g, '/')
+  if (!s) return undefined
+  s = s.replace(/^\/+/, '')
+  s = s.replace(/^volume\d+\//i, '')
+  s = s.replace(/\/+$/, '')
+  return s || undefined
+}
+
 export class DsmClient {
   baseUrl: string
   apiInfo: Record<string, ApiInfo> = {}
   synoToken = ''
   sid = ''
+  /** DownloadStation 专用 sid。群晖要求此类 API 必须用 session=DownloadStation 登录，
+   *  与 FileStation session 的 sid 不互通。为两者同时可用，我们双登录并按 api 前缀路由。 */
+  dsSid = ''
 
   constructor(baseUrl = '') {
     this.baseUrl = baseUrl.replace(/\/$/, '')
@@ -76,12 +92,16 @@ export class DsmClient {
     _retried = false,
   ): Promise<T> {
     const method = opts.method ?? 'GET'
+    // 根据调用的 api 选择会话 sid：SYNO.DownloadStation.* 优先用 dsSid，其余用主 sid
+    const apiName = (opts.form?.api as string | undefined) ?? (opts.query?.api as string | undefined) ?? ''
+    const useDsSid = apiName.startsWith('SYNO.DownloadStation.') && !!this.dsSid
+    const effectiveSid = useDsSid ? this.dsSid : this.sid
     // 注入 _sid（DSM session ID）
     const query = { ...(opts.query ?? {}) }
     const form = opts.form ? { ...opts.form } : undefined
-    if (this.sid) {
-      if (form) form._sid = this.sid
-      else query._sid = this.sid
+    if (effectiveSid) {
+      if (form) form._sid = effectiveSid
+      else query._sid = effectiveSid
     }
     const url = this.buildUrl(path, query)
     const headers: Record<string, string> = { ...(opts.headers ?? {}) }
@@ -150,7 +170,9 @@ export class DsmClient {
     return this.apiInfo[api]?.maxVersion ?? 1
   }
 
-  /** 调用 /webapi/entry.cgi 的统一入口（doc 1.1） */
+  /** 调用 webapi 统一入口（doc 1.1）。
+   *  DSM 7 上 entry.cgi 只能路由到某些 API，Download Station 等第三方套件必须走专用 CGI。
+   *  优先使用 SYNO.API.Info 返回的 path 字段动态拼接 URL，未加载时则回退 entry.cgi。 */
   async entry<T = any>(
     api: string,
     method: string,
@@ -162,13 +184,15 @@ export class DsmClient {
       method,
       ...(opts.params ?? {}),
     }
+    const cgiPath = this.apiInfo[api]?.path ?? 'entry.cgi'
+    const url = `/webapi/${cgiPath}`
     if (opts.post) {
-      return this.request<DsmResponse<T>>('/webapi/entry.cgi', {
+      return this.request<DsmResponse<T>>(url, {
         method: 'POST',
         form: full,
       })
     }
-    return this.request<DsmResponse<T>>('/webapi/entry.cgi', { query: full })
+    return this.request<DsmResponse<T>>(url, { query: full })
   }
 
   /** 明文登录（doc 3.1 method=login）
@@ -207,6 +231,28 @@ export class DsmClient {
           synoToken: this.synoToken,
         })
       } catch (e) { console.warn('[dsm] set_session failed:', e) }
+      // 追加 DownloadStation 会话登录（双 sid 策略），同步等待以保证 dsSid 就绪；失败不阻断主登录
+      await this.dsLogin(params).catch(() => {})
+    }
+    return res
+  }
+
+  /** DownloadStation 专用登录，拿到独立 sid 存于 dsSid。
+   *  不调 set_session（Rust 端只需要主 sid 走媒体代理）。 */
+  private async dsLogin(params: { account: string; passwd: string; otp_code?: string; device_id?: string }) {
+    const res = await this.entry<AuthResult>('SYNO.API.Auth', 'login', {
+      post: true,
+      params: {
+        session: 'DownloadStation',
+        format: 'sid',
+        account: params.account,
+        passwd: params.passwd,
+        otp_code: params.otp_code ?? '',
+        ...(params.device_id ? { device_id: params.device_id } : {}),
+      },
+    })
+    if (res.success && res.data?.sid) {
+      this.dsSid = res.data.sid
     }
     return res
   }
@@ -214,6 +260,11 @@ export class DsmClient {
   /** 登出（doc 3.2），session 必须与 login 时一致 */
   async logout() {
     const res = await this.entry('SYNO.API.Auth', 'logout', { params: { session: 'FileStation' } })
+    // 一并登出 DownloadStation session（如果之前登过）
+    if (this.dsSid) {
+      await this.entry('SYNO.API.Auth', 'logout', { params: { session: 'DownloadStation' } }).catch(() => {})
+      this.dsSid = ''
+    }
     try { await invoke('clear_session') } catch (e) { console.warn('[dsm] clear_session failed:', e) }
     return res
   }
@@ -499,7 +550,7 @@ export class DsmClient {
   }) {
     return this.entry('SYNO.DownloadStation.Task', 'create', {
       post: true,
-      params,
+      params: { ...params, destination: normalizeDsDestination(params.destination) },
     })
   }
 
@@ -512,8 +563,10 @@ export class DsmClient {
     form.append('api', 'SYNO.DownloadStation.Task')
     form.append('version', String(version))
     form.append('method', 'create')
-    if (this.sid) form.append('_sid', this.sid)
-    if (destination) form.append('destination', destination)
+    const sid = this.dsSid || this.sid
+    if (sid) form.append('_sid', sid)
+    const dest = normalizeDsDestination(destination)
+    if (dest) form.append('destination', dest)
     form.append('file', file, file.name)
     const url = `${this.baseUrl}/webapi/${cgi}`
     const headers: Record<string, string> = this.authHeaders()

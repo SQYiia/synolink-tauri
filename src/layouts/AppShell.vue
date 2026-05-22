@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { dsm, setSessionRecoverer } from '../api/dsm'
 import { useAppStore } from '../stores/app'
-import { downloadQueue, cancelTask, removeTask, clearCompleted, downloadDir, revealSavedFile } from '../composables/useDownloadQueue'
+import { downloadQueue, cancelTask, removeTask, clearCompleted, downloadDir, revealSavedFile, chooseDownloadDir, resetDownloadDir, askEveryDownload, setAskEveryDownload } from '../composables/useDownloadQueue'
 import { formatBytes } from '../utils/format'
 
 const router = useRouter()
@@ -195,7 +195,20 @@ const visibleTabs = computed(() => isMobile.value ? mobileTabs : tabs)
       <div class="dl-savedir">
         <div class="dl-savedir-label">保存位置</div>
         <div class="dl-savedir-path" :title="downloadDir">{{ downloadDir || '默认 Downloads' }}</div>
-        <el-button v-if="downloadDir" size="small" link @click="revealSavedFile(downloadDir)">打开</el-button>
+        <div class="dl-savedir-actions">
+          <el-button size="small" link @click="chooseDownloadDir">修改</el-button>
+          <el-button v-if="downloadDir" size="small" link @click="revealSavedFile(downloadDir)">打开</el-button>
+          <el-button v-if="downloadDir" size="small" link type="info" @click="resetDownloadDir">默认</el-button>
+        </div>
+      </div>
+      <div class="dl-ask-row">
+        <el-checkbox
+          :model-value="askEveryDownload"
+          @change="(v: boolean | string | number) => setAskEveryDownload(!!v)"
+          size="small"
+        >
+          每次下载前询问保存目录
+        </el-checkbox>
       </div>
       <div class="dl-toolbar" v-if="downloadQueue.length">
         <el-button size="small" @click="clearCompleted">清除已完成</el-button>
@@ -381,6 +394,8 @@ const visibleTabs = computed(() => isMobile.value ? mobileTabs : tabs)
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   direction: rtl; text-align: left;
 }
+.dl-savedir-actions { display: flex; gap: 2px; flex-shrink: 0; }
+.dl-ask-row { margin: 0 0 10px; font-size: 12px; color: var(--el-text-color-secondary); }
 .dl-toolbar { display: flex; justify-content: flex-end; margin-bottom: 8px; }
 .dl-item { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: var(--sl-border); }
 .dl-info { flex: 1; min-width: 0; }

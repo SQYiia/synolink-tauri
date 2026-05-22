@@ -6,7 +6,7 @@ import { formatBytes, formatSpeed } from '../utils/format'
 import { useDownloadStation, getStatusLabel, type DSTask } from '../composables/useDownloadStation'
 import FolderPicker from '../components/FolderPicker.vue'
 
-const { tasks, statistic, loading, available, startPolling, refresh, createTask, createTaskFile, pauseTasks, resumeTasks, deleteTasks } = useDownloadStation()
+const { tasks, statistic, loading, available, reason, startPolling, retry, createTask, createTaskFile, pauseTasks, resumeTasks, deleteTasks } = useDownloadStation()
 
 const selected = ref<DSTask[]>([])
 const createOpen = ref(false)
@@ -60,20 +60,25 @@ async function handleCreate() {
   }
   creating.value = true
   try {
-    let ok = false
+    let res: { ok: boolean; error?: string }
     if (createFile.value) {
-      ok = await createTaskFile(createFile.value, createDest.value || undefined)
+      res = await createTaskFile(createFile.value, createDest.value || undefined)
     } else {
-      ok = await createTask(createUri.value.trim(), createDest.value || undefined)
+      res = await createTask(createUri.value.trim(), createDest.value || undefined)
     }
-    if (ok) {
+    if (res.ok) {
       ElMessage.success('任务已创建')
       createOpen.value = false
       createUri.value = ''
       createFile.value = null
       createDest.value = ''
     } else {
-      ElMessage.error('创建失败')
+      ElMessage({
+        type: 'error',
+        message: '创建失败：' + (res.error ?? ''),
+        duration: 8000,
+        showClose: true,
+      })
     }
   } finally {
     creating.value = false
@@ -163,11 +168,11 @@ async function btAddDownload(item: any) {
     ElMessage.warning('无下载链接')
     return
   }
-  const ok = await createTask(uri)
-  if (ok) {
+  const res = await createTask(uri)
+  if (res.ok) {
     ElMessage.success(`已添加：${item.title}`)
   } else {
-    ElMessage.error('添加失败')
+    ElMessage({ type: 'error', message: '添加失败：' + (res.error ?? ''), duration: 8000, showClose: true })
   }
 }
 
@@ -189,9 +194,10 @@ onMounted(() => {
     <!-- 未安装提示 -->
     <div v-if="!available" class="ds-unavailable">
       <el-icon :size="40"><Connection /></el-icon>
-      <h3>Download Station 未安装</h3>
-      <p>请在群晖套件中心安装 Download Station</p>
-      <el-button @click="refresh">重试</el-button>
+      <h3>Download Station 不可用</h3>
+      <p>可能原因：未在群晖套件中心安装 Download Station，或当前账号无访问权限</p>
+      <pre v-if="reason" class="ds-reason">{{ reason }}</pre>
+      <el-button @click="retry" :loading="loading">重试</el-button>
     </div>
 
     <template v-else>
@@ -379,6 +385,18 @@ onMounted(() => {
 }
 .ds-unavailable h3 { margin: 8px 0 0; font-size: 16px; color: var(--el-text-color-primary); }
 .ds-unavailable p { margin: 4px 0 16px; font-size: 13px; }
+.ds-reason {
+  max-width: 80%;
+  margin: 0 0 16px;
+  padding: 8px 12px;
+  background: var(--el-fill-color-light);
+  border-radius: var(--sl-radius-sm);
+  font-size: 12px;
+  color: var(--el-color-danger);
+  white-space: pre-wrap;
+  word-break: break-all;
+  text-align: left;
+}
 
 .ds-header {
   display: flex;

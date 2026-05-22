@@ -137,6 +137,7 @@ async fn download_to_file(
     task_id: String,
     path: String,
     name: String,
+    save_dir: Option<String>,
 ) -> Result<(), String> {
     let (session, cancel_flag) = {
         let state = app.state::<AppState>();
@@ -150,10 +151,14 @@ async fn download_to_file(
         return Err("session not set".into());
     }
 
-    let dl_dir = app
-        .path()
-        .download_dir()
-        .map_err(|e| format!("download_dir: {}", e))?;
+    // 优先使用前端传入的保存目录，为空则回退系统默认 Downloads
+    let dl_dir = match save_dir.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        Some(s) => std::path::PathBuf::from(s),
+        None => app
+            .path()
+            .download_dir()
+            .map_err(|e| format!("download_dir: {}", e))?,
+    };
     if !dl_dir.exists() {
         std::fs::create_dir_all(&dl_dir).map_err(|e| format!("create dir: {}", e))?;
     }
@@ -557,6 +562,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(AppState::default())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .register_asynchronous_uri_scheme_protocol("dsm", dsm_protocol)
