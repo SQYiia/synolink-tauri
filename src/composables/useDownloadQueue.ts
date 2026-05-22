@@ -52,12 +52,16 @@ interface DonePayload { taskId: string; savePath: string }
 interface ErrorPayload { taskId: string; error: string }
 
 /** 全局事件监听只装一次 */
-let listenersReady = false
+let listenersReady: Promise<void> | null = null
 const unlistens: UnlistenFn[] = []
 
-async function ensureListeners() {
-  if (listenersReady) return
-  listenersReady = true
+function ensureListeners(): Promise<void> {
+  if (listenersReady) return listenersReady
+  listenersReady = doSetupListeners()
+  return listenersReady
+}
+
+async function doSetupListeners() {
   unlistens.push(
     await listen<ProgressPayload>('download:progress', (e) => {
       const t = state.tasks.find(x => x.id === e.payload.taskId)
@@ -71,7 +75,6 @@ async function ensureListeners() {
       t.status = 'done'
       t.savePath = e.payload.savePath
       if (t.size > 0) t.loaded = t.size
-      // 完成提示：带“打开所在目录”按钮
       ElNotification({
         title: '下载完成',
         message: h('div', [
@@ -103,18 +106,16 @@ async function ensureListeners() {
   )
 }
 
-export function enqueue(path: string, name: string, size: number = 0) {
-  ensureListeners()
+export async function enqueue(path: string, name: string, size: number = 0) {
+  await ensureListeners()
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const task: DownloadTask = { id, path, name, size, loaded: 0, status: 'queued' }
   state.tasks.unshift(task)
-  // 启动提示保存位置
-  ensureDownloadDir().then(dir => {
-    ElMessage({
-      type: 'info',
-      message: dir ? `已加入下载队列，保存到：${dir}` : '已加入下载队列',
-      duration: 2500,
-    })
+  const dir = await ensureDownloadDir()
+  ElMessage({
+    type: 'info',
+    message: dir ? `已加入下载队列，保存到：${dir}` : '已加入下载队列',
+    duration: 2500,
   })
   processQueue()
   return id
@@ -125,7 +126,6 @@ export function cancelTask(id: string) {
   if (!task) return
   if (task.status === 'downloading') {
     invoke('cancel_download', { taskId: id }).catch(() => { /* ignore */ })
-    // 状态变更交给 download:cancelled 事件统一处理
   } else if (task.status === 'queued') {
     task.status = 'cancelled'
     processQueue()
@@ -138,7 +138,8 @@ export function removeTask(id: string) {
 }
 
 export function clearCompleted() {
-  state.tasks = state.tasks.filter(t => t.status === 'downloading' || t.status === 'queued')
+  const remaining = state.tasks.filter(t => t.status === 'downloading' || t.status === 'queued')
+  state.tasks.splice(0, state.tasks.length, ...remaining)
 }
 
 function activeCount() {
@@ -156,14 +157,11 @@ function processQueue() {
 async function startDownload(task: DownloadTask) {
   task.status = 'downloading'
   task.error = undefined
-  // 全部委托给 Rust 端：流式 reqwest + tokio fs 写盘 + .synodownload 临时文件断点续传 + 进度事件
-  // 这里不 await，避免阻塞队列调度；最终状态由 download:done/error/cancelled 事件改写
   invoke('download_to_file', {
     taskId: task.id,
     path: task.path,
     name: task.name,
   }).catch((e: any) => {
-    // 命令本身被拒（比如 session 未设）才会走到这里；正常错误由 download:error 事件处理
     if (task.status === 'downloading') {
       task.status = 'error'
       task.error = typeof e === 'string' ? e : (e?.message ?? String(e))

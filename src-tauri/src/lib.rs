@@ -18,7 +18,6 @@ struct Session {
 struct AppState {
     session: RwLock<Session>,
     http: reqwest::Client,
-    /// taskId -> cancel flag，下载任务并发取消控制
     cancels: RwLock<HashMap<String, Arc<AtomicBool>>>,
 }
 
@@ -39,6 +38,22 @@ impl Default for AppState {
     }
 }
 
+fn read_session(state: &AppState) -> Session {
+    state.session.read().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+fn write_session(state: &AppState) -> std::sync::RwLockWriteGuard<'_, Session> {
+    state.session.write().unwrap_or_else(|e| e.into_inner())
+}
+
+fn read_cancels(state: &AppState) -> std::sync::RwLockReadGuard<'_, HashMap<String, Arc<AtomicBool>>> {
+    state.cancels.read().unwrap_or_else(|e| e.into_inner())
+}
+
+fn write_cancels(state: &AppState) -> std::sync::RwLockWriteGuard<'_, HashMap<String, Arc<AtomicBool>>> {
+    state.cancels.write().unwrap_or_else(|e| e.into_inner())
+}
+
 #[tauri::command]
 fn set_session(
     state: tauri::State<'_, AppState>,
@@ -46,7 +61,7 @@ fn set_session(
     sid: String,
     syno_token: String,
 ) {
-    let mut s = state.session.write().unwrap();
+    let mut s = write_session(&state);
     s.base_url = base_url.trim_end_matches('/').to_string();
     s.sid = sid;
     s.syno_token = syno_token;
@@ -54,7 +69,7 @@ fn set_session(
 
 #[tauri::command]
 fn clear_session(state: tauri::State<'_, AppState>) {
-    let mut s = state.session.write().unwrap();
+    let mut s = write_session(&state);
     *s = Session::default();
 }
 
@@ -80,7 +95,6 @@ struct ErrorPayload {
     error: String,
 }
 
-/// 过滤 Windows 不合法的文件名字符
 fn safe_filename(name: &str) -> String {
     let bad = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
     let mut s: String = name
@@ -93,7 +107,6 @@ fn safe_filename(name: &str) -> String {
     s
 }
 
-/// 重名避免冲突：name.ext -> name (1).ext / name (2).ext ...
 fn unique_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
     let target = dir.join(name);
     if !target.exists() {
@@ -112,8 +125,12 @@ fn unique_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
     dir.join(format!("{}-{}{}", stem, std::process::id(), ext))
 }
 
-/// 下载文件到本地 Downloads 目录。支持 Range 断点续传（.synodownload 临时文件），
-/// 进度通过 "download:progress" 事件推送，完成/错误/取消各自发布独立事件。
+/// 用 task_id 前 8 字符生成唯一的临时文件名，避免同名文件并发下载冲突
+fn part_filename(task_id: &str, name: &str) -> String {
+    let short_id = if task_id.len() >= 8 { &task_id[..8] } else { task_id };
+    format!("{}.{}.synodownload", name, short_id)
+}
+
 #[tauri::command]
 async fn download_to_file(
     app: tauri::AppHandle,
@@ -121,16 +138,11 @@ async fn download_to_file(
     path: String,
     name: String,
 ) -> Result<(), String> {
-    // 拿 session 与 cancel flag
     let (session, cancel_flag) = {
         let state = app.state::<AppState>();
-        let session = state.session.read().unwrap().clone();
+        let session = read_session(&state);
         let flag = Arc::new(AtomicBool::new(false));
-        state
-            .cancels
-            .write()
-            .unwrap()
-            .insert(task_id.clone(), flag.clone());
+        write_cancels(&state).insert(task_id.clone(), flag.clone());
         (session, flag)
     };
 
@@ -138,7 +150,6 @@ async fn download_to_file(
         return Err("session not set".into());
     }
 
-    // 计算保存路径：Downloads 目录 + .synodownload 临时文件
     let dl_dir = app
         .path()
         .download_dir()
@@ -147,15 +158,13 @@ async fn download_to_file(
         std::fs::create_dir_all(&dl_dir).map_err(|e| format!("create dir: {}", e))?;
     }
     let final_name = safe_filename(&name);
-    let part_path = dl_dir.join(format!("{}.synodownload", final_name));
+    let part_path = dl_dir.join(part_filename(&task_id, &final_name));
 
-    // 如果已有 part 文件 → 从它实现断点续传
     let resume_from: u64 = match std::fs::metadata(&part_path) {
         Ok(m) => m.len(),
         Err(_) => 0,
     };
 
-    // 拼 URL：复用 stream 逻辑的参数格式（entry.cgi + mode=open + path 裸字符串编码 + _sid）
     let url = format!(
         "{}/webapi/entry.cgi?api=SYNO.FileStation.Download&version=2&method=download&mode=open&path={}&_sid={}",
         session.base_url,
@@ -191,7 +200,6 @@ async fn download_to_file(
         return Err(format!("HTTP {}", status));
     }
 
-    // 总字节数：206 则从 Content-Range 取 total；200 则从 Content-Length
     let total: u64 = if supports_resume {
         resp.headers()
             .get("content-range")
@@ -203,7 +211,6 @@ async fn download_to_file(
         resp.content_length().unwrap_or(0)
     };
 
-    // 打开 part 文件：206 追加写；200 覆写（服务器不支持续传时丢弃已有部分）
     let mut file = if supports_resume && resume_from > 0 {
         tokio::fs::OpenOptions::new()
             .append(true)
@@ -217,7 +224,6 @@ async fn download_to_file(
     };
     let mut loaded: u64 = if supports_resume { resume_from } else { 0 };
 
-    // 进度 emit 限频：至少间隔 200ms 或累计 256KB 才推一次
     let mut last_emit = Instant::now();
     let mut last_loaded = loaded;
     const EMIT_BYTES: u64 = 256 * 1024;
@@ -235,7 +241,6 @@ async fn download_to_file(
     let mut stream = resp.bytes_stream();
     while let Some(chunk) = stream.next().await {
         if cancel_flag.load(Ordering::Relaxed) {
-            // 取消：flush 后保留 part 文件供下次续传
             let _ = file.flush().await;
             let _ = app.emit(
                 "download:cancelled",
@@ -283,7 +288,20 @@ async fn download_to_file(
     file.flush().await.map_err(|e| format!("flush: {}", e))?;
     drop(file);
 
-    // 完成：.synodownload 重命名为最终名（同名则递增序号）
+    // 完整性校验：如果服务器报告了 total 且实际写入不匹配，视为失败
+    if total > 0 && loaded != total {
+        let msg = format!("incomplete download: got {} of {} bytes", loaded, total);
+        let _ = app.emit(
+            "download:error",
+            ErrorPayload {
+                task_id: task_id.clone(),
+                error: msg.clone(),
+            },
+        );
+        cleanup_cancel(&app, &task_id);
+        return Err(msg);
+    }
+
     let final_path = unique_path(&dl_dir, &final_name);
     tokio::fs::rename(&part_path, &final_path)
         .await
@@ -308,15 +326,13 @@ async fn download_to_file(
     Ok(())
 }
 
-/// 取消一个进行中的下载任务（不会删 .synodownload文件，便于后续续传）
 #[tauri::command]
 fn cancel_download(state: tauri::State<'_, AppState>, task_id: String) {
-    if let Some(flag) = state.cancels.read().unwrap().get(&task_id) {
+    if let Some(flag) = read_cancels(&state).get(&task_id) {
         flag.store(true, Ordering::Relaxed);
     }
 }
 
-/// 返回默认下载目录（系统 Downloads）的完整路径字符串
 #[tauri::command]
 fn get_default_download_dir(app: tauri::AppHandle) -> Result<String, String> {
     let dir = app
@@ -328,7 +344,7 @@ fn get_default_download_dir(app: tauri::AppHandle) -> Result<String, String> {
 
 fn cleanup_cancel(app: &tauri::AppHandle, task_id: &str) {
     let state = app.state::<AppState>();
-    state.cancels.write().unwrap().remove(task_id);
+    write_cancels(&state).remove(task_id);
 }
 
 fn encode_path(p: &str) -> String {
@@ -346,10 +362,8 @@ fn encode_path(p: &str) -> String {
     percent_encoding::utf8_percent_encode(p, SET).to_string()
 }
 
-/// 单次代理返回的最大字节数（WebView 只能一次性收取 body，分块才能避免大视频压垮内存）
 const MAX_CHUNK: u64 = 4 * 1024 * 1024;
 
-/// 把请求的 Range 截断到 MAX_CHUNK
 fn clamp_range(range: Option<&str>) -> String {
     let raw = range.unwrap_or("bytes=0-");
     let rest = raw.strip_prefix("bytes=").unwrap_or("0-");
@@ -365,7 +379,6 @@ fn clamp_range(range: Option<&str>) -> String {
     format!("bytes={}-{}", start, end)
 }
 
-/// 根据文件扩展名推测 Content-Type
 fn guess_mime(path: &str) -> Option<&'static str> {
     let ext = path.rsplit('.').next()?.to_ascii_lowercase();
     Some(match ext.as_str() {
@@ -449,7 +462,28 @@ async fn proxy(
     let resp = req.send().await.map_err(|e| e.to_string())?;
     let status = resp.status();
     let headers = resp.headers().clone();
-    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+
+    // 如果是 stream 且服务端返回 200（不支持 Range），截断到 MAX_CHUNK 防止内存爆炸
+    let bytes = if is_stream && status.as_u16() == 200 {
+        let mut buf = Vec::with_capacity(MAX_CHUNK as usize);
+        let mut stream = resp.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| e.to_string())?;
+            let remaining = MAX_CHUNK as usize - buf.len();
+            if remaining == 0 {
+                break;
+            }
+            if chunk.len() <= remaining {
+                buf.extend_from_slice(&chunk);
+            } else {
+                buf.extend_from_slice(&chunk[..remaining]);
+                break;
+            }
+        }
+        buf.into()
+    } else {
+        resp.bytes().await.map_err(|e| e.to_string())?
+    };
 
     let mut builder = Response::builder().status(status.as_u16());
     let mut has_ct = false;
@@ -505,10 +539,7 @@ fn dsm_protocol(
 
     tauri::async_runtime::spawn(async move {
         let state = app.state::<AppState>();
-        let session = {
-            let guard = state.session.read().unwrap();
-            guard.clone()
-        };
+        let session = read_session(&state);
         let resp = match proxy(&state.http, session, uri, range).await {
             Ok(r) => r,
             Err(e) => Response::builder()
