@@ -45,11 +45,27 @@ export interface AuthResult {
  * - 登录成功后自动保存 synotoken，后续请求注入 X-SYNO-TOKEN（doc 1.7）。
  * - Cookie 由 DSM 下发的 Set-Cookie 自动维护（Tauri 会持久 cookie）。
  */
+
+/** Download Station `destination` 必须是**相对于共享文件夹的**路径，如 `Downloads/sub`。
+ *  常见 FolderPicker 会返回 `/Downloads/...` 或 `/volume1/Downloads/...`，这里统一去除前导 `/` 与 `volumeN/`。 */
+function normalizeDsDestination(p?: string): string | undefined {
+  if (!p) return undefined
+  let s = String(p).trim().replace(/\\/g, '/')
+  if (!s) return undefined
+  s = s.replace(/^\/+/, '')
+  s = s.replace(/^volume\d+\//i, '')
+  s = s.replace(/\/+$/, '')
+  return s || undefined
+}
+
 export class DsmClient {
   baseUrl: string
   apiInfo: Record<string, ApiInfo> = {}
   synoToken = ''
   sid = ''
+  /** DownloadStation 专用 sid。群晖要求此类 API 必须用 session=DownloadStation 登录，
+   *  与 FileStation session 的 sid 不互通。为两者同时可用，我们双登录并按 api 前缀路由。 */
+  dsSid = ''
 
   constructor(baseUrl = '') {
     this.baseUrl = baseUrl.replace(/\/$/, '')
@@ -76,16 +92,23 @@ export class DsmClient {
     _retried = false,
   ): Promise<T> {
     const method = opts.method ?? 'GET'
+    // 根据调用的 api 选择会话 sid：SYNO.DownloadStation.* 优先用 dsSid，其余用主 sid
+    const apiName = (opts.form?.api as string | undefined) ?? (opts.query?.api as string | undefined) ?? ''
+    const useDsSid = apiName.startsWith('SYNO.DownloadStation.') && !!this.dsSid
+    const effectiveSid = useDsSid ? this.dsSid : this.sid
     // 注入 _sid（DSM session ID）
     const query = { ...(opts.query ?? {}) }
     const form = opts.form ? { ...opts.form } : undefined
-    if (this.sid) {
-      if (form) form._sid = this.sid
-      else query._sid = this.sid
+    if (effectiveSid) {
+      if (form) form._sid = effectiveSid
+      else query._sid = effectiveSid
     }
     const url = this.buildUrl(path, query)
     const headers: Record<string, string> = { ...(opts.headers ?? {}) }
     if (this.synoToken) headers['X-SYNO-TOKEN'] = this.synoToken
+    // 注：不注入 Cookie: id=<sid>。
+    // webapi 登录拿到的 sid 与 DSM Web GUI 登录的 cookie id 是两套独立会话，值不同；
+    // 贸然把 webapi sid 当作 cookie id 注入，DSM 拿它去校验 GUI session 表会失败 → 119。
 
     let body: string | undefined
     if (form) {
@@ -147,7 +170,9 @@ export class DsmClient {
     return this.apiInfo[api]?.maxVersion ?? 1
   }
 
-  /** 调用 /webapi/entry.cgi 的统一入口（doc 1.1） */
+  /** 调用 webapi 统一入口（doc 1.1）。
+   *  DSM 7 上 entry.cgi 只能路由到某些 API，Download Station 等第三方套件必须走专用 CGI。
+   *  优先使用 SYNO.API.Info 返回的 path 字段动态拼接 URL，未加载时则回退 entry.cgi。 */
   async entry<T = any>(
     api: string,
     method: string,
@@ -159,16 +184,22 @@ export class DsmClient {
       method,
       ...(opts.params ?? {}),
     }
+    const cgiPath = this.apiInfo[api]?.path ?? 'entry.cgi'
+    const url = `/webapi/${cgiPath}`
     if (opts.post) {
-      return this.request<DsmResponse<T>>('/webapi/entry.cgi', {
+      return this.request<DsmResponse<T>>(url, {
         method: 'POST',
         form: full,
       })
     }
-    return this.request<DsmResponse<T>>('/webapi/entry.cgi', { query: full })
+    return this.request<DsmResponse<T>>(url, { query: full })
   }
 
-  /** 明文登录（doc 3.1 method=login） */
+  /** 明文登录（doc 3.1 method=login）
+   *  注意：必须使用 session='FileStation' 登录！
+   *  SYNO.FileStation.* 系列 API（尤其是 Download）对 session 类型校验严格，
+   *  使用 'webui' 或其他 session 名会导致 Download 接口返回错误码 119（即使参数、cookie、URL 全部正确）。
+   *  SYNO.Core.* 系列在 FileStation session 下同样可用（File Station 应用内部本就调这些）。 */
   async login(params: {
     account: string
     passwd: string
@@ -179,7 +210,7 @@ export class DsmClient {
     const res = await this.entry<AuthResult>('SYNO.API.Auth', 'login', {
       post: true,
       params: {
-        session: 'webui',
+        session: 'FileStation',
         format: 'sid',
         enable_syno_token: 'yes',
         enable_device_token: params.enable_device_token ?? 'no',
@@ -200,13 +231,40 @@ export class DsmClient {
           synoToken: this.synoToken,
         })
       } catch (e) { console.warn('[dsm] set_session failed:', e) }
+      // 追加 DownloadStation 会话登录（双 sid 策略），同步等待以保证 dsSid 就绪；失败不阻断主登录
+      await this.dsLogin(params).catch(() => {})
     }
     return res
   }
 
-  /** 登出（doc 3.2） */
+  /** DownloadStation 专用登录，拿到独立 sid 存于 dsSid。
+   *  不调 set_session（Rust 端只需要主 sid 走媒体代理）。 */
+  private async dsLogin(params: { account: string; passwd: string; otp_code?: string; device_id?: string }) {
+    const res = await this.entry<AuthResult>('SYNO.API.Auth', 'login', {
+      post: true,
+      params: {
+        session: 'DownloadStation',
+        format: 'sid',
+        account: params.account,
+        passwd: params.passwd,
+        otp_code: params.otp_code ?? '',
+        ...(params.device_id ? { device_id: params.device_id } : {}),
+      },
+    })
+    if (res.success && res.data?.sid) {
+      this.dsSid = res.data.sid
+    }
+    return res
+  }
+
+  /** 登出（doc 3.2），session 必须与 login 时一致 */
   async logout() {
-    const res = await this.entry('SYNO.API.Auth', 'logout', { params: { session: 'webui' } })
+    const res = await this.entry('SYNO.API.Auth', 'logout', { params: { session: 'FileStation' } })
+    // 一并登出 DownloadStation session（如果之前登过）
+    if (this.dsSid) {
+      await this.entry('SYNO.API.Auth', 'logout', { params: { session: 'DownloadStation' } }).catch(() => {})
+      this.dsSid = ''
+    }
     try { await invoke('clear_session') } catch (e) { console.warn('[dsm] clear_session failed:', e) }
     return res
   }
@@ -329,19 +387,23 @@ export class DsmClient {
     return this.entry('SYNO.FileStation.Search', 'stop', { post: true, params: { taskid } })
   }
 
-  /** 构造下载 URL（doc 4.10 download），带 _sid 走 GET */
-  downloadUrl(path: string, mode: 'open' | 'download' = 'download') {
+  /** 构造下载 URL（doc 4.10 download），带 _sid 走 GET
+   *  注意：
+   *  1. 强制使用 entry.cgi 而非 apiInfo 给出的独立 cgi（独立 cgi 对 _sid 校验更严格）。
+   *  2. path 必须是 JSON 数组字符串 ["..."]，DSM 7+ 裸字符串会报 119。
+   *  3. 默认 mode='open'：DSM 7 下 mode='download' 会严格校验 GUI session cookie，
+   *     webapi 客户端拿不到 GUI session id，只能走 mode='open' 拿字节流。 */
+  downloadUrl(path: string, mode: 'open' | 'download' = 'open') {
     const info = this.apiInfo['SYNO.FileStation.Download']
-    const cgi = info?.path ?? 'entry.cgi'
     const params = new URLSearchParams({
       api: 'SYNO.FileStation.Download',
       version: String(info?.maxVersion ?? 2),
       method: 'download',
-      path,
+      path: JSON.stringify([path]),
       mode,
       _sid: this.sid,
     })
-    return `${this.baseUrl}/webapi/${cgi}?${params.toString()}`
+    return `${this.baseUrl}/webapi/entry.cgi?${params.toString()}`
   }
 
   /** 构造缩略图 URL（doc 4.5 thumb） */
@@ -359,14 +421,19 @@ export class DsmClient {
     return `${this.baseUrl}/webapi/${cgi}?${params.toString()}`
   }
 
+  /** 统一拼装认证 header（仅 X-SYNO-TOKEN），给直接 fetch 调用复用 */
+  private authHeaders(): Record<string, string> {
+    const h: Record<string, string> = {}
+    if (this.synoToken) h['X-SYNO-TOKEN'] = this.synoToken
+    return h
+  }
+
   /** 拉取缩略图字节（绕过自签名证书） */
   async thumbBytes(path: string, size: 'small' | 'medium' | 'large' | 'original' = 'small'): Promise<ArrayBuffer> {
     const url = this.thumbUrl(path, size)
-    const headers: Record<string, string> = {}
-    if (this.synoToken) headers['X-SYNO-TOKEN'] = this.synoToken
     const res = await fetch(url, {
       method: 'GET',
-      headers,
+      headers: this.authHeaders(),
       danger: { acceptInvalidCerts: true, acceptInvalidHostnames: true },
     } as any)
     return await res.arrayBuffer()
@@ -388,8 +455,7 @@ export class DsmClient {
     form.append('file', file, file.name)
 
     const url = `${this.baseUrl}/webapi/${cgi}`
-    const headers: Record<string, string> = {}
-    if (this.synoToken) headers['X-SYNO-TOKEN'] = this.synoToken
+    const headers: Record<string, string> = this.authHeaders()
     const res = await fetch(url, {
       method: 'POST',
       headers,
@@ -407,11 +473,9 @@ export class DsmClient {
   /** 获取文件字节（用于预览或本地保存） */
   async downloadBytes(path: string): Promise<ArrayBuffer> {
     const url = this.downloadUrl(path, 'open')
-    const headers: Record<string, string> = {}
-    if (this.synoToken) headers['X-SYNO-TOKEN'] = this.synoToken
     const res = await fetch(url, {
       method: 'GET',
-      headers,
+      headers: this.authHeaders(),
       danger: { acceptInvalidCerts: true, acceptInvalidHostnames: true },
     } as any)
     return await res.arrayBuffer()
@@ -444,6 +508,191 @@ export class DsmClient {
   mediaUrl(kind: 'stream' | 'thumb', path: string, extra: Record<string, string> = {}) {
     const params = new URLSearchParams({ path, ...extra })
     return `${DSM_SCHEME_BASE}/${kind}?${params.toString()}`
+  }
+
+  // ─── Download Station ─────────────────────────────────────────────
+
+  /** DS 版本信息 */
+  async dsInfo() {
+    return this.entry('SYNO.DownloadStation.Info', 'getinfo')
+  }
+
+  /** DS 配置 */
+  async dsGetConfig() {
+    return this.entry('SYNO.DownloadStation.Info', 'getconfig')
+  }
+
+  /** 列出下载任务 */
+  async dsTaskList(opts: { offset?: number; limit?: number; additional?: string } = {}) {
+    return this.entry('SYNO.DownloadStation.Task', 'list', {
+      params: {
+        offset: opts.offset ?? 0,
+        limit: opts.limit ?? -1,
+        additional: opts.additional ?? 'detail,transfer',
+      },
+    })
+  }
+
+  /** 获取指定任务详情 */
+  async dsTaskGetInfo(ids: string[], additional = 'detail,transfer,file') {
+    return this.entry('SYNO.DownloadStation.Task', 'getinfo', {
+      params: { id: ids.join(','), additional },
+    })
+  }
+
+  /** 创建下载任务（URL/磁力链接） */
+  async dsTaskCreate(params: {
+    uri: string
+    destination?: string
+    username?: string
+    password?: string
+    unzip_password?: string
+  }) {
+    return this.entry('SYNO.DownloadStation.Task', 'create', {
+      post: true,
+      params: { ...params, destination: normalizeDsDestination(params.destination) },
+    })
+  }
+
+  /** 创建下载任务（torrent/nzb 文件上传） */
+  async dsTaskCreateFile(file: File, destination?: string) {
+    const info = this.apiInfo['SYNO.DownloadStation.Task']
+    const cgi = info?.path ?? 'entry.cgi'
+    const version = info?.maxVersion ?? 1
+    const form = new FormData()
+    form.append('api', 'SYNO.DownloadStation.Task')
+    form.append('version', String(version))
+    form.append('method', 'create')
+    const sid = this.dsSid || this.sid
+    if (sid) form.append('_sid', sid)
+    const dest = normalizeDsDestination(destination)
+    if (dest) form.append('destination', dest)
+    form.append('file', file, file.name)
+    const url = `${this.baseUrl}/webapi/${cgi}`
+    const headers: Record<string, string> = this.authHeaders()
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: form,
+      danger: { acceptInvalidCerts: true, acceptInvalidHostnames: true },
+    } as any)
+    const text = await res.text()
+    try {
+      return JSON.parse(text) as DsmResponse
+    } catch {
+      return { success: false, error: { code: -1, errors: text } } as DsmResponse
+    }
+  }
+
+  /** 删除任务 */
+  async dsTaskDelete(ids: string[], forceComplete = false) {
+    return this.entry('SYNO.DownloadStation.Task', 'delete', {
+      params: { id: ids.join(','), force_complete: forceComplete ? 'true' : 'false' },
+    })
+  }
+
+  /** 暂停任务 */
+  async dsTaskPause(ids: string[]) {
+    return this.entry('SYNO.DownloadStation.Task', 'pause', {
+      params: { id: ids.join(',') },
+    })
+  }
+
+  /** 恢复任务 */
+  async dsTaskResume(ids: string[]) {
+    return this.entry('SYNO.DownloadStation.Task', 'resume', {
+      params: { id: ids.join(',') },
+    })
+  }
+
+  /** 全局速度统计 */
+  async dsStatistic() {
+    return this.entry('SYNO.DownloadStation.Statistic', 'getinfo')
+  }
+
+  /** 启动 BT 搜索 */
+  async dsBTSearchStart(keyword: string, module = 'all') {
+    return this.entry<{ taskid: string }>('SYNO.DownloadStation.BTSearch', 'start', {
+      params: { keyword, module },
+    })
+  }
+
+  /** 获取 BT 搜索结果 */
+  async dsBTSearchList(taskid: string, opts: {
+    offset?: number; limit?: number;
+    sort_by?: string; sort_direction?: string;
+  } = {}) {
+    return this.entry('SYNO.DownloadStation.BTSearch', 'list', {
+      params: {
+        taskid,
+        offset: opts.offset ?? 0,
+        limit: opts.limit ?? 50,
+        sort_by: opts.sort_by ?? 'seeds',
+        sort_direction: opts.sort_direction ?? 'desc',
+      },
+    })
+  }
+
+  /** 清除 BT 搜索任务 */
+  async dsBTSearchClean(taskid: string) {
+    return this.entry('SYNO.DownloadStation.BTSearch', 'clean', { params: { taskid } })
+  }
+
+  /** 获取 BT 搜索模块 */
+  async dsBTSearchModules() {
+    return this.entry('SYNO.DownloadStation.BTSearch', 'getModule')
+  }
+
+  // ─── VMM (Virtual Machine Manager) ───────────────────────────────
+
+  /** 列出主机 */
+  async vmmHostList() {
+    return this.entry('SYNO.Virtualization.API.Host', 'list')
+  }
+
+  /** 列出虚拟机 */
+  async vmmGuestList(additional = true) {
+    return this.entry('SYNO.Virtualization.API.Guest', 'list', {
+      params: { additional },
+    })
+  }
+
+  /** 获取指定虚拟机信息 */
+  async vmmGuestGet(opts: { guest_id?: string; guest_name?: string }) {
+    return this.entry('SYNO.Virtualization.API.Guest', 'get', {
+      params: { ...opts, additional: true },
+    })
+  }
+
+  /** 虚拟机开机 */
+  async vmmGuestPowerOn(guestId: string) {
+    return this.entry('SYNO.Virtualization.API.Guest.Action', 'poweron', {
+      params: { guest_id: guestId },
+    })
+  }
+
+  /** 虚拟机正常关机 */
+  async vmmGuestShutdown(guestId: string) {
+    return this.entry('SYNO.Virtualization.API.Guest.Action', 'shutdown', {
+      params: { guest_id: guestId },
+    })
+  }
+
+  /** 虚拟机强制关机 */
+  async vmmGuestPowerOff(guestId: string) {
+    return this.entry('SYNO.Virtualization.API.Guest.Action', 'poweroff', {
+      params: { guest_id: guestId },
+    })
+  }
+
+  /** VMM 存储列表 */
+  async vmmStorageList() {
+    return this.entry('SYNO.Virtualization.API.Storage', 'list')
+  }
+
+  /** VMM 网络列表 */
+  async vmmNetworkList() {
+    return this.entry('SYNO.Virtualization.API.Network', 'list')
   }
 }
 

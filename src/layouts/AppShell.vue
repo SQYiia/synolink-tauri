@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { dsm, setSessionRecoverer } from '../api/dsm'
 import { useAppStore } from '../stores/app'
-import { downloadQueue, cancelTask, removeTask, clearCompleted } from '../composables/useDownloadQueue'
+import { downloadQueue, cancelTask, removeTask, clearCompleted, downloadDir, revealSavedFile, chooseDownloadDir, resetDownloadDir, askEveryDownload, setAskEveryDownload } from '../composables/useDownloadQueue'
 import { formatBytes } from '../utils/format'
 
 const router = useRouter()
@@ -101,8 +101,21 @@ const tabs = [
   { to: '/app/files', label: '文件', icon: 'Folder' },
   { to: '/app/album', label: '相册', icon: 'Picture' },
   { to: '/app/videos', label: '视频', icon: 'VideoCamera' },
+  { to: '/app/downloads', label: '下载站', icon: 'Connection' },
+  { to: '/app/vmm', label: '虚拟机', icon: 'Monitor' },
   { to: '/app/me', label: '我的', icon: 'User' },
 ]
+
+const mobileTabs = [
+  { to: '/app/dashboard', label: '首页', icon: 'HomeFilled' },
+  { to: '/app/me', label: '我的', icon: 'User' },
+]
+
+const isMobile = ref(window.innerWidth <= 640)
+function onResize() { isMobile.value = window.innerWidth <= 640 }
+onMounted(() => window.addEventListener('resize', onResize))
+onUnmounted(() => window.removeEventListener('resize', onResize))
+const visibleTabs = computed(() => isMobile.value ? mobileTabs : tabs)
 </script>
 
 <template>
@@ -110,7 +123,7 @@ const tabs = [
     <aside class="sidebar">
       <div class="sidebar-nav">
         <RouterLink
-          v-for="t in tabs"
+          v-for="t in visibleTabs"
           :key="t.to"
           :to="t.to"
           class="nav-item"
@@ -179,6 +192,24 @@ const tabs = [
 
     <!-- 下载队列 -->
     <el-drawer v-model="downloadDrawerOpen" title="下载队列" direction="rtl" size="360px">
+      <div class="dl-savedir">
+        <div class="dl-savedir-label">保存位置</div>
+        <div class="dl-savedir-path" :title="downloadDir">{{ downloadDir || '默认 Downloads' }}</div>
+        <div class="dl-savedir-actions">
+          <el-button size="small" link @click="chooseDownloadDir">修改</el-button>
+          <el-button v-if="downloadDir" size="small" link @click="revealSavedFile(downloadDir)">打开</el-button>
+          <el-button v-if="downloadDir" size="small" link type="info" @click="resetDownloadDir">默认</el-button>
+        </div>
+      </div>
+      <div class="dl-ask-row">
+        <el-checkbox
+          :model-value="askEveryDownload"
+          @change="(v: boolean | string | number) => setAskEveryDownload(!!v)"
+          size="small"
+        >
+          每次下载前询问保存目录
+        </el-checkbox>
+      </div>
       <div class="dl-toolbar" v-if="downloadQueue.length">
         <el-button size="small" @click="clearCompleted">清除已完成</el-button>
       </div>
@@ -193,6 +224,7 @@ const tabs = [
             <span v-else-if="t.status === 'cancelled'">已取消</span>
             <span v-else>排队中</span>
           </div>
+          <div v-if="t.status === 'done' && t.savePath" class="dl-savepath" :title="t.savePath">{{ t.savePath }}</div>
           <el-progress
             v-if="t.status === 'downloading' && t.size"
             :percentage="Math.round((t.loaded / t.size) * 100)"
@@ -203,7 +235,10 @@ const tabs = [
         </div>
         <div class="dl-actions">
           <el-button v-if="t.status === 'downloading' || t.status === 'queued'" size="small" type="warning" @click="cancelTask(t.id)">取消</el-button>
-          <el-button v-else size="small" @click="removeTask(t.id)">移除</el-button>
+          <template v-else>
+            <el-button v-if="t.status === 'done' && t.savePath" size="small" type="primary" link @click="revealSavedFile(t.savePath)">打开</el-button>
+            <el-button size="small" @click="removeTask(t.id)">移除</el-button>
+          </template>
         </div>
       </div>
     </el-drawer>
@@ -277,6 +312,45 @@ const tabs = [
   background: var(--sl-primary);
 }
 
+/* Mobile: sidebar → bottom tab bar */
+@media (max-width: 640px) {
+  .app-shell {
+    flex-direction: column-reverse;
+  }
+  .sidebar {
+    width: 100%;
+    flex-direction: row;
+    border-right: none;
+    border-top: var(--sl-border);
+    padding: 0;
+    height: 52px;
+  }
+  .sidebar-nav {
+    flex-direction: row;
+    justify-content: space-around;
+    padding: 0;
+    gap: 0;
+  }
+  .sidebar-bottom {
+    display: none;
+  }
+  .nav-item {
+    margin: 0;
+    padding: 6px 0;
+    flex: 1;
+    border-radius: 0;
+  }
+  .nav-item.active::before {
+    left: 25%;
+    right: 25%;
+    top: 0;
+    bottom: auto;
+    width: auto;
+    height: 2px;
+    border-radius: 0 0 2px 2px;
+  }
+}
+
 /* Content */
 .content {
   flex: 1;
@@ -307,11 +381,31 @@ const tabs = [
 .gsearch-empty { text-align: center; padding: 40px 0; color: var(--el-text-color-secondary); font-size: 13px; }
 
 /* Download queue */
+.dl-savedir {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; margin-bottom: 10px;
+  background: var(--el-fill-color-light);
+  border-radius: var(--sl-radius-sm);
+}
+.dl-savedir-label { font-size: 11px; color: var(--el-text-color-secondary); flex-shrink: 0; }
+.dl-savedir-path {
+  flex: 1; min-width: 0;
+  font-size: 12px; color: var(--el-text-color-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  direction: rtl; text-align: left;
+}
+.dl-savedir-actions { display: flex; gap: 2px; flex-shrink: 0; }
+.dl-ask-row { margin: 0 0 10px; font-size: 12px; color: var(--el-text-color-secondary); }
 .dl-toolbar { display: flex; justify-content: flex-end; margin-bottom: 8px; }
 .dl-item { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: var(--sl-border); }
 .dl-info { flex: 1; min-width: 0; }
 .dl-name { font-size: 13px; font-weight: 500; color: var(--el-text-color-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dl-meta { font-size: 11px; color: var(--el-text-color-secondary); margin-top: 2px; }
+.dl-savepath {
+  font-size: 11px; color: var(--el-text-color-secondary); margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  direction: rtl; text-align: left;
+}
 .dl-error { color: var(--el-color-danger); }
-.dl-actions { flex-shrink: 0; }
+.dl-actions { flex-shrink: 0; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
 </style>
