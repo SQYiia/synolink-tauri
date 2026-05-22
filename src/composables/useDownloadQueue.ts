@@ -112,10 +112,11 @@ export async function enqueue(path: string, name: string, size: number = 0) {
   const task: DownloadTask = { id, path, name, size, loaded: 0, status: 'queued' }
   state.tasks.unshift(task)
   const dir = await ensureDownloadDir()
-  ElMessage({
+  ElNotification({
+    title: '已加入下载队列',
     type: 'info',
-    message: dir ? `已加入下载队列，保存到：${dir}` : '已加入下载队列',
-    duration: 2500,
+    message: dir ? `保存位置：${dir}` : '',
+    duration: 4000,
   })
   processQueue()
   return id
