@@ -333,7 +333,7 @@ export class DsmClient {
       version: String(info?.maxVersion ?? 2),
       method: 'download',
       path: JSON.stringify([path]),
-      mode,
+      mode: JSON.stringify(mode),
       _sid: this.sid,
     })
     return `${this.baseUrl}/webapi/entry.cgi?${params.toString()}`
