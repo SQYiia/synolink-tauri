@@ -243,7 +243,7 @@ export class DsmClient {
   async createFolder(folderPath: string, name: string, forceParent = false) {
     return this.entry('SYNO.FileStation.CreateFolder', 'create', {
       post: true,
-      params: { folder_path: folderPath, name, force_parent: forceParent ? 'true' : 'false' },
+      params: { folder_path: JSON.stringify([folderPath]), name: JSON.stringify([name]), force_parent: forceParent ? 'true' : 'false' },
     })
   }
 
@@ -251,13 +251,13 @@ export class DsmClient {
   async rename(path: string, name: string) {
     return this.entry('SYNO.FileStation.Rename', 'rename', {
       post: true,
-      params: { path, name },
+      params: { path: JSON.stringify([path]), name: JSON.stringify([name]) },
     })
   }
 
   /** 删除（blocking 模式，doc 4.12 delete） */
   async deletePath(path: string | string[], recursive = true) {
-    const p = Array.isArray(path) ? path.join(',') : path
+    const p = JSON.stringify(Array.isArray(path) ? path : [path])
     return this.entry('SYNO.FileStation.Delete', 'delete', {
       post: true,
       params: { path: p, recursive: recursive ? 'true' : 'false' },
@@ -266,7 +266,7 @@ export class DsmClient {
 
   /** 复制或移动文件/文件夹（doc 4.9 start） */
   async copyMove(paths: string[], destFolder: string, overwrite = false, removeSource = false) {
-    const p = paths.join(',')
+    const p = JSON.stringify(paths)
     return this.entry<{ taskid: string }>('SYNO.FileStation.CopyMove', 'start', {
       post: true,
       params: {
