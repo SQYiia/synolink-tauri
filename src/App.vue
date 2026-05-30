@@ -9,31 +9,39 @@ import {
   openIOSSettings,
   networkPreviouslyOk,
   markNetworkSuccess,
+  setRetryProbe,
+  retryNetworkProbe,
 } from './composables/useIOSNetworkPermission'
 
 const app = useAppStore()
+const retrying = ref(false)
 
 /** iOS 本地网络权限触发：
- *  iOS 任何对私有 IP 段（10/8、172.16/12、192.168/16、169.254/16）的请求都会触发系统评估
- *  NSLocalNetworkUsageDescription 权限。首次会弹原生弹窗，已决策则静默。 */
-async function primeIOSLocalNetworkPermission(): Promise<boolean> {
+ *  向本地 IP 发请求触发 iOS 评估 NSLocalNetworkUsageDescription 权限。
+ *  优先使用用户已配置的 NAS 地址（更可靠），无服务器时回退 link-local。 */
+async function primeIOSLocalNetworkPermission(probeUrl?: string): Promise<boolean> {
   if (!isIOS) return true
+  const target = probeUrl || 'http://169.254.42.42:65535/'
   try {
     const ctrl = new AbortController()
-    const t = setTimeout(() => ctrl.abort(), 2000)
-    await tauriFetch('http://169.254.42.42:65535/', {
+    const t = setTimeout(() => ctrl.abort(), 3000)
+    await tauriFetch(target, {
       signal: ctrl.signal,
       danger: { acceptInvalidCerts: true, acceptInvalidHostnames: true },
     } as any)
     clearTimeout(t)
-    // 走到这里说明请求被系统放过（即使目标不可达，建立 socket 阶段没被沙盒拦）
     markNetworkSuccess()
     return true
-  } catch (e: any) {
-    // 失败有 2 种可能：a) 系统在评估权限弹窗（尚未拒绝） b) 已被用户拒绝
-    // 无法可靠区分，由后续真实业务请求的失败计数器（useIOSNetworkPermission）兜底判断
+  } catch {
     return false
   }
+}
+
+/** 从 store 拿第一个服务器的 URL 作为探测目标 */
+function getProbeUrl(): string | undefined {
+  const s = app.servers[0]
+  if (!s) return undefined
+  return `${s.protocol}://${s.host}:${s.port}/webapi/query.cgi?api=SYNO.API.Info&version=1&method=query`
 }
 
 // 首次启动教学弹窗：仅在 iOS 且历史从未成功过本地网络访问时显示
@@ -43,21 +51,22 @@ const onboardingOpen = ref(false)
 function dismissOnboarding() {
   try { localStorage.setItem(ONBOARDING_KEY, '1') } catch {}
   onboardingOpen.value = false
-  void primeIOSLocalNetworkPermission()
+  void primeIOSLocalNetworkPermission(getProbeUrl())
 }
 
 onMounted(() => {
-  app.load()
-  initTheme()
-  if (isIOS) {
-    const onboarded = (() => { try { return localStorage.getItem(ONBOARDING_KEY) === '1' } catch { return false } })()
-    if (!onboarded && !networkPreviouslyOk()) {
-      // 首次：先弹我们的解释窗，用户点"允许"后再 prime（让 iOS 弹自己的弹窗）
-      onboardingOpen.value = true
-    } else {
-      void primeIOSLocalNetworkPermission()
+  app.load().then(() => {
+    initTheme()
+    if (isIOS) {
+      setRetryProbe(async () => primeIOSLocalNetworkPermission(getProbeUrl()))
+      const onboarded = (() => { try { return localStorage.getItem(ONBOARDING_KEY) === '1' } catch { return false } })()
+      if (!onboarded && !networkPreviouslyOk()) {
+        onboardingOpen.value = true
+      } else {
+        void primeIOSLocalNetworkPermission(getProbeUrl())
+      }
     }
-  }
+  })
 })
 </script>
 
@@ -90,16 +99,13 @@ onMounted(() => {
     </template>
   </van-dialog>
 
-  <!-- 检测到被拒绝：阻断式遮罩 + 跳设置 -->
+  <!-- 检测到被拒绝：阻断式遮罩 + 重试 / 跳设置 -->
   <van-dialog
     v-model:show="iosNetworkBlocked"
     title="本地网络权限未开启"
-    :show-cancel-button="true"
-    cancel-button-text="知道了"
-    confirm-button-text="去设置"
+    :show-cancel-button="false"
     :close-on-click-overlay="false"
     teleport="body"
-    @confirm="openIOSSettings"
   >
     <div class="net-blocked">
       <div class="net-blocked-icon">
@@ -113,6 +119,15 @@ onMounted(() => {
         路径：设置 → SynoLink → 本地网络
       </p>
     </div>
+    <template #footer>
+      <div class="net-blocked-actions">
+        <van-button block plain @click="retrying = true; retryNetworkProbe().finally(() => retrying = false)">
+          <van-loading v-if="retrying" size="14" style="margin-right: 6px" />
+          重新检测
+        </van-button>
+        <van-button block type="primary" @click="openIOSSettings">去设置</van-button>
+      </div>
+    </template>
   </van-dialog>
 </template>
 
@@ -545,5 +560,8 @@ body,
   padding: 8px 10px;
   margin-top: 12px !important;
   display: inline-block;
+}
+.net-blocked-actions {
+  display: flex; gap: 8px; padding: 0 18px 18px;
 }
 </style>
