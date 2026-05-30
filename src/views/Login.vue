@@ -6,6 +6,7 @@ import { showDialog, showToast, showFailToast, showSuccessToast } from 'vant'
 import { useAppStore } from '../stores/app'
 import { dsm } from '../api/dsm'
 import { useIsMobile } from '../composables/useIsMobile'
+import { markNetworkSuccess, markNetworkFailure, iosNetworkBlocked } from '../composables/useIOSNetworkPermission'
 
 const route = useRoute()
 const router = useRouter()
@@ -31,9 +32,14 @@ onMounted(async () => {
   dsm.sid = ''
   try {
     await dsm.loadApiInfo()
+    markNetworkSuccess()
   } catch (e: any) {
-    if (isMobile.value) showFailToast(`无法连接服务器：${e?.message ?? e}`)
-    else ElMessage.error(`无法连接服务器：${e?.message ?? e}`)
+    markNetworkFailure()
+    // 如果检测到是本地网络权限问题，由全局阻断弹窗处理，这里不再 toast
+    if (!iosNetworkBlocked.value) {
+      if (isMobile.value) showFailToast(`无法连接服务器：${e?.message ?? e}`)
+      else ElMessage.error(`无法连接服务器：${e?.message ?? e}`)
+    }
   }
 
   const last = app.accounts.filter(a => a.serverId === serverId).sort((a, b) => (b.lastLoginTime ?? 0) - (a.lastLoginTime ?? 0))[0]
@@ -74,6 +80,7 @@ async function submit() {
     while (needOtp) {
       needOtp = false
       const res = await dsm.login({ account: form.account, passwd: form.passwd, otp_code: form.otp_code })
+      markNetworkSuccess()
       if (res.success) {
         const existed = app.accounts.find(a => a.serverId === serverId && a.account === form.account)
         if (existed) {
@@ -111,8 +118,11 @@ async function submit() {
     }
   } catch (e: any) {
     if ((e as any) !== 'cancel') {
-      if (isMobile.value) showFailToast(`请求异常：${e?.message ?? e}`)
-      else ElMessage.error(`请求异常：${e?.message ?? e}`)
+      markNetworkFailure()
+      if (!iosNetworkBlocked.value) {
+        if (isMobile.value) showFailToast(`请求异常：${e?.message ?? e}`)
+        else ElMessage.error(`请求异常：${e?.message ?? e}`)
+      }
     }
   } finally {
     loading.value = false

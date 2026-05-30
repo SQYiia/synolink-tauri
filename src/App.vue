@@ -1,18 +1,119 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useAppStore } from './stores/app'
 import { initTheme } from './composables/useTheme'
+import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
+import { isIOS } from './utils/platform'
+import {
+  iosNetworkBlocked,
+  openIOSSettings,
+  networkPreviouslyOk,
+  markNetworkSuccess,
+} from './composables/useIOSNetworkPermission'
 
 const app = useAppStore()
+
+/** iOS 本地网络权限触发：
+ *  iOS 任何对私有 IP 段（10/8、172.16/12、192.168/16、169.254/16）的请求都会触发系统评估
+ *  NSLocalNetworkUsageDescription 权限。首次会弹原生弹窗，已决策则静默。 */
+async function primeIOSLocalNetworkPermission(): Promise<boolean> {
+  if (!isIOS) return true
+  try {
+    const ctrl = new AbortController()
+    const t = setTimeout(() => ctrl.abort(), 2000)
+    await tauriFetch('http://169.254.42.42:65535/', {
+      signal: ctrl.signal,
+      danger: { acceptInvalidCerts: true, acceptInvalidHostnames: true },
+    } as any)
+    clearTimeout(t)
+    // 走到这里说明请求被系统放过（即使目标不可达，建立 socket 阶段没被沙盒拦）
+    markNetworkSuccess()
+    return true
+  } catch (e: any) {
+    // 失败有 2 种可能：a) 系统在评估权限弹窗（尚未拒绝） b) 已被用户拒绝
+    // 无法可靠区分，由后续真实业务请求的失败计数器（useIOSNetworkPermission）兜底判断
+    return false
+  }
+}
+
+// 首次启动教学弹窗：仅在 iOS 且历史从未成功过本地网络访问时显示
+const ONBOARDING_KEY = 'synolink.iosNetworkOnboarded'
+const onboardingOpen = ref(false)
+
+function dismissOnboarding() {
+  try { localStorage.setItem(ONBOARDING_KEY, '1') } catch {}
+  onboardingOpen.value = false
+  void primeIOSLocalNetworkPermission()
+}
 
 onMounted(() => {
   app.load()
   initTheme()
+  if (isIOS) {
+    const onboarded = (() => { try { return localStorage.getItem(ONBOARDING_KEY) === '1' } catch { return false } })()
+    if (!onboarded && !networkPreviouslyOk()) {
+      // 首次：先弹我们的解释窗，用户点"允许"后再 prime（让 iOS 弹自己的弹窗）
+      onboardingOpen.value = true
+    } else {
+      void primeIOSLocalNetworkPermission()
+    }
+  }
 })
 </script>
 
 <template>
   <router-view />
+
+  <!-- 首次启动：解释为什么要本地网络权限，确认后触发系统弹窗 -->
+  <van-dialog
+    v-model:show="onboardingOpen"
+    title="允许访问本地网络"
+    confirm-button-text="允许"
+    :show-cancel-button="false"
+    :close-on-click-overlay="false"
+    teleport="body"
+  >
+    <div class="net-onboard">
+      <div class="net-onboard-icon">
+        <van-icon name="wifi" size="40" color="hsl(217 91% 60%)" />
+      </div>
+      <p>
+        SynoLink 需要访问<b>本地网络</b>才能连接你局域网内的群晖 NAS。<br />
+        点「允许」后，iOS 会再弹一次系统级权限请求，请同样选择允许。
+      </p>
+      <p class="net-onboard-sub">
+        权限可以随时在「设置 → SynoLink → 本地网络」中开启或关闭。
+      </p>
+    </div>
+    <template #footer>
+      <van-button block type="primary" @click="dismissOnboarding">允许</van-button>
+    </template>
+  </van-dialog>
+
+  <!-- 检测到被拒绝：阻断式遮罩 + 跳设置 -->
+  <van-dialog
+    v-model:show="iosNetworkBlocked"
+    title="本地网络权限未开启"
+    :show-cancel-button="true"
+    cancel-button-text="知道了"
+    confirm-button-text="去设置"
+    :close-on-click-overlay="false"
+    teleport="body"
+    @confirm="openIOSSettings"
+  >
+    <div class="net-blocked">
+      <div class="net-blocked-icon">
+        <van-icon name="warning-o" size="40" color="hsl(0 84% 60%)" />
+      </div>
+      <p>
+        无法连接到你的群晖 NAS。<br />
+        看起来 SynoLink 没有<b>本地网络</b>权限，请前往系统设置开启。
+      </p>
+      <p class="net-blocked-path">
+        路径：设置 → SynoLink → 本地网络
+      </p>
+    </div>
+  </van-dialog>
 </template>
 
 <style>
@@ -413,5 +514,36 @@ body,
   .van-cell-group--inset {
     margin: 10px 12px;
   }
+}
+
+/* 网络权限弹窗内部样式（global，因为 dialog teleport 到 body） */
+.net-onboard, .net-blocked {
+  padding: 20px 18px 8px;
+  text-align: center;
+  font-size: 14px;
+  color: hsl(var(--foreground));
+  line-height: 1.6;
+}
+.net-onboard-icon, .net-blocked-icon {
+  margin: 0 auto 14px;
+  width: 64px; height: 64px;
+  border-radius: 16px;
+  display: flex; align-items: center; justify-content: center;
+}
+.net-onboard-icon { background: hsl(217 91% 60% / 0.1); }
+.net-blocked-icon { background: hsl(0 84% 60% / 0.1); }
+.net-onboard p, .net-blocked p { margin: 0 0 8px; }
+.net-onboard-sub {
+  font-size: 12px; color: hsl(var(--muted-foreground)) !important;
+  margin-top: 12px !important;
+}
+.net-blocked-path {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--muted));
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-top: 12px !important;
+  display: inline-block;
 }
 </style>

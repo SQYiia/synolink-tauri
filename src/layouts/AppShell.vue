@@ -4,7 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { dsm, setSessionRecoverer } from '../api/dsm'
 import { useAppStore } from '../stores/app'
-import { downloadQueue, cancelTask, removeTask, clearCompleted, downloadDir, revealSavedFile, chooseDownloadDir, resetDownloadDir, askEveryDownload, setAskEveryDownload } from '../composables/useDownloadQueue'
+import { downloadQueue, cancelTask, removeTask, clearCompleted, downloadDir, revealSavedFile, chooseDownloadDir, resetDownloadDir, askEveryDownload, setAskEveryDownload, localPickerOpen, resolveLocalPicker } from '../composables/useDownloadQueue'
+import LocalFolderPicker from '../components/LocalFolderPicker.vue'
 import { formatBytes } from '../utils/format'
 import { useIsMobile } from '../composables/useIsMobile'
 import { useEdgeSwipeBack } from '../composables/useEdgeSwipeBack'
@@ -405,6 +406,14 @@ function onTabChange(i: number) {
         </van-cell>
       </van-cell-group>
     </van-popup>
+
+    <!-- iOS / 移动端 in-app 目录选择器 -->
+    <LocalFolderPicker
+      v-model="localPickerOpen"
+      title="选择下载目录"
+      @confirm="resolveLocalPicker($event)"
+      @update:model-value="(v: boolean) => { if (!v) resolveLocalPicker(null) }"
+    />
   </div>
 </template>
 

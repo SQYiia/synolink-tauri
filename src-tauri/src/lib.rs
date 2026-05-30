@@ -354,6 +354,91 @@ fn get_default_download_dir(app: tauri::AppHandle) -> Result<String, String> {
     Ok(dir.to_string_lossy().to_string())
 }
 
+/// 用户可访问的本地根目录（iOS 沙盒 = Documents，桌面 = 系统 Downloads / Documents）。
+/// 用作 in-app 文件夹选择器的起点 / 根。
+#[tauri::command]
+fn get_local_root_dir(app: tauri::AppHandle) -> Result<String, String> {
+    // iOS / Android：用 Documents（沙盒可读写、文件 App 可见）
+    // macOS / Win / Linux：优先 Documents（Tauri 的 download_dir 在某些环境不可靠）
+    let dir = app
+        .path()
+        .document_dir()
+        .or_else(|_| app.path().download_dir())
+        .map_err(|e| format!("local root dir: {}", e))?;
+    if !dir.exists() {
+        let _ = std::fs::create_dir_all(&dir);
+    }
+    Ok(dir.to_string_lossy().to_string())
+}
+
+#[derive(serde::Serialize)]
+pub struct LocalEntry {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+}
+
+/// 列出 parent 下的直接子目录（文件不列）。
+/// 校验 parent 在 root_dir 之内（防越权 / 不让用户跳出沙盒访问其他 App 的容器）。
+#[tauri::command]
+fn list_local_subdirs(app: tauri::AppHandle, parent: String) -> Result<Vec<LocalEntry>, String> {
+    let root = std::path::PathBuf::from(get_local_root_dir(app.clone())?);
+    let target = std::path::PathBuf::from(&parent).canonicalize()
+        .or_else(|_| Ok::<_, String>(std::path::PathBuf::from(&parent)))?;
+    let root_canon = root.canonicalize().unwrap_or(root.clone());
+    if !target.starts_with(&root_canon) && target != root_canon {
+        return Err(format!("路径越界：{} 不在 {} 之内", target.display(), root_canon.display()));
+    }
+    let read = std::fs::read_dir(&target).map_err(|e| format!("read_dir: {}", e))?;
+    let mut out: Vec<LocalEntry> = Vec::new();
+    for entry in read.flatten() {
+        let ft = match entry.file_type() {
+            Ok(ft) => ft,
+            Err(_) => continue,
+        };
+        if !ft.is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') {
+            continue; // 跳过隐藏目录
+        }
+        out.push(LocalEntry {
+            name,
+            path: entry.path().to_string_lossy().to_string(),
+            is_dir: true,
+        });
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
+/// 在 parent 下新建子目录，返回完整路径。
+/// 同样校验 parent 在 root_dir 之内，且 name 不含路径分隔符。
+#[tauri::command]
+fn create_local_subdir(app: tauri::AppHandle, parent: String, name: String) -> Result<String, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("名称不能为空".into());
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') || trimmed.starts_with('.') {
+        return Err("名称非法（不能含 / \\，不能以 . 开头）".into());
+    }
+    let root = std::path::PathBuf::from(get_local_root_dir(app.clone())?);
+    let parent_path = std::path::PathBuf::from(&parent);
+    let root_canon = root.canonicalize().unwrap_or(root.clone());
+    let parent_canon = parent_path.canonicalize().unwrap_or(parent_path.clone());
+    if !parent_canon.starts_with(&root_canon) && parent_canon != root_canon {
+        return Err("路径越界".into());
+    }
+    let target = parent_path.join(trimmed);
+    if target.exists() {
+        return Err("目录已存在".into());
+    }
+    std::fs::create_dir_all(&target).map_err(|e| format!("mkdir: {}", e))?;
+    Ok(target.to_string_lossy().to_string())
+}
+
 fn cleanup_cancel(app: &tauri::AppHandle, task_id: &str) {
     let state = app.state::<AppState>();
     write_cancels(&state).remove(task_id);
@@ -769,6 +854,9 @@ pub fn run() {
             download_to_file,
             cancel_download,
             get_default_download_dir,
+            get_local_root_dir,
+            list_local_subdirs,
+            create_local_subdir,
             clear_thumb_cache,
             get_thumb_cache_stats
         ])

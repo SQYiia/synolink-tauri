@@ -6,6 +6,7 @@ import { useAppStore } from '../stores/app'
 import type { ServerConfig } from '../stores/app'
 import { useIsMobile } from '../composables/useIsMobile'
 import { confirm } from '../utils/feedback'
+import { markNetworkSuccess, markNetworkFailure } from '../composables/useIOSNetworkPermission'
 
 const router = useRouter()
 const app = useAppStore()
@@ -36,8 +37,10 @@ async function checkServer(s: ServerConfig) {
     } as any)
     clearTimeout(timer)
     status.value[s.id] = resp.ok ? 'online' : 'offline'
+    if (resp.ok) markNetworkSuccess()
   } catch {
     status.value[s.id] = 'offline'
+    markNetworkFailure()
   }
 }
 

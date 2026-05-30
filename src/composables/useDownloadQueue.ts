@@ -59,10 +59,35 @@ async function ensureDownloadDir() {
   return downloadDir.value
 }
 
-/** 弹出系统目录选择器，选定后更新全局下载目录并持久化。
- *  iOS：通过 UIDocumentPickerViewController 选择「文件」App 中的目录（含 iCloud Drive、On My iPhone）。
- *  若用户取消或系统不支持，回退到 App 内 Documents。 */
+/** 移动端 chooseDownloadDir 由 LocalFolderPicker 接管：
+ *  AppShell 监听这个 ref，true 时打开 in-app 目录选择器，用户选/取消时 resolve 这个 promise。 */
+export const localPickerOpen = ref(false)
+let localPickerResolver: ((p: string | null) => void) | null = null
+export function resolveLocalPicker(path: string | null) {
+  if (localPickerResolver) {
+    localPickerResolver(path)
+    localPickerResolver = null
+  }
+  localPickerOpen.value = false
+}
+
+/** 弹出目录选择器：
+ *  - 桌面：tauri-plugin-dialog 原生选择器
+ *  - 移动端 (iOS/Android)：in-app LocalFolderPicker（沙盒 Documents 内浏览/新建）
+ *    因为 tauri-plugin-dialog v2 在 iOS 上 directory:true 直接返回 FolderPickerNotImplemented */
 export async function chooseDownloadDir(): Promise<string | null> {
+  if (isIOS) {
+    return new Promise<string | null>((resolve) => {
+      localPickerResolver = resolve
+      localPickerOpen.value = true
+    }).then((picked) => {
+      if (!picked) return null
+      downloadDir.value = picked
+      localStorage.setItem(LS_KEY_SAVE_DIR, picked)
+      showToast('已设置下载目录')
+      return picked
+    })
+  }
   try {
     const picked = await openDialog({
       directory: true,
@@ -73,13 +98,10 @@ export async function chooseDownloadDir(): Promise<string | null> {
     if (!picked || Array.isArray(picked)) return null
     downloadDir.value = picked
     localStorage.setItem(LS_KEY_SAVE_DIR, picked)
-    if (isIOS) showToast('已设置下载目录')
-    else ElMessage.success('下载目录已更新：' + picked)
+    ElMessage.success('下载目录已更新：' + picked)
     return picked
   } catch (e: any) {
-    const msg = e?.message ?? String(e)
-    if (isIOS) showToast({ message: '系统不支持选目录：' + msg, duration: 2400 })
-    else ElMessage.error('选择目录失败：' + msg)
+    ElMessage.error('选择目录失败：' + (e?.message ?? e))
     return null
   }
 }
