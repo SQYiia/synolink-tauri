@@ -578,6 +578,14 @@ function onTabChange(i: number) {
   border: 1px solid hsl(var(--border));
   border-radius: 8px;
 }
+.m-shell :deep(.van-button--plain.van-button--default) {
+  color: hsl(var(--foreground));
+  border-color: hsl(var(--border));
+  background: hsl(var(--background));
+}
+.m-shell :deep(.van-button--plain.van-button--default:active) {
+  background: hsl(var(--muted));
+}
 .m-dl-savedir-ios {
   font-size: 12px; color: hsl(var(--muted-foreground));
   padding: 10px 14px;
