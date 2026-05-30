@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { showImagePreview } from 'vant'
 import { dsm } from '../api/dsm'
 import { formatBytes } from '../utils/format'
 import { useMediaScan } from '../composables/useMediaScan'
@@ -9,6 +8,7 @@ import { enqueue as enqueueDownload } from '../composables/useDownloadQueue'
 import FolderPicker from '../components/FolderPicker.vue'
 import LazyThumb from '../components/LazyThumb.vue'
 import { useIsMobile } from '../composables/useIsMobile'
+import { useBackHandler } from '../composables/useEdgeSwipeBack'
 import { confirm, toast } from '../utils/feedback'
 
 const isMobile = useIsMobile()
@@ -244,18 +244,18 @@ function fullOf(p: any) {
 }
 function onFullError(p: any) { p._fullFailed = true }
 
+// 移动端图片预览状态（组件式，比 showImagePreview 命令式更可控）
+const mPreviewOpen = ref(false)
+const mPreviewImages = ref<string[]>([])
+const mPreviewIndex = ref(0)
+
 function openPhoto(p: any) {
   const idx = flatPhotos.value.findIndex((x) => x.path === p.path)
   if (idx < 0) return
   if (isMobile.value) {
-    // 移动端用 van-image-preview（双指缩放 + 横滑切换）
-    const images = flatPhotos.value.map((x: any) => fullOf(x))
-    showImagePreview({
-      images,
-      startPosition: idx,
-      closeable: true,
-      showIndex: true,
-    })
+    mPreviewImages.value = flatPhotos.value.map((x: any) => fullOf(x))
+    mPreviewIndex.value = idx
+    mPreviewOpen.value = true
   } else {
     viewerIndex.value = idx
     viewerOpen.value = true
@@ -326,29 +326,41 @@ async function onMobilePickFolder(p: string) {
   await scan()
 }
 
-// 移动端长按删除单张
-async function onMobileLongPress(p: any) {
+// 移动端图片预览的删除/下载（操作当前预览中的图）
+async function mDeleteCurrent() {
+  const p = flatPhotos.value[mPreviewIndex.value]
+  if (!p) return
   const ok = await confirm(`确定删除「${p.name}」？`, '删除', { danger: true, confirmText: '删除' })
   if (!ok) return
   const res = await dsm.deletePath(p.path)
   if (res.success) {
     toast('已删除', 'success')
     photos.value = photos.value.filter((x: any) => x.path !== p.path)
+    mPreviewImages.value = flatPhotos.value.map((x: any) => fullOf(x))
+    if (mPreviewIndex.value >= mPreviewImages.value.length) {
+      mPreviewIndex.value = Math.max(0, mPreviewImages.value.length - 1)
+    }
+    if (!mPreviewImages.value.length) mPreviewOpen.value = false
   } else {
     toast(`删除失败 code=${res.error?.code}`, 'error')
   }
 }
-let longPressTimer: ReturnType<typeof setTimeout> | null = null
-function onTouchStart(p: any) {
-  if (!isMobile.value) return
-  longPressTimer = setTimeout(() => {
-    onMobileLongPress(p)
-    longPressTimer = null
-  }, 600)
+
+function mDownloadCurrent() {
+  const p = flatPhotos.value[mPreviewIndex.value]
+  if (!p) return
+  const size = Number((p as any).additional?.size || (p as any).size || 0)
+  enqueueDownload(p.path, p.name, size)
+  toast('已加入下载队列', 'success')
 }
-function onTouchEnd() {
-  if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null }
-}
+
+// 侧滑返回：预览打开时优先关预览
+useBackHandler(() => {
+  if (!isMobile.value) return false
+  if (mPreviewOpen.value) { mPreviewOpen.value = false; return true }
+  if (pickerOpen.value) { pickerOpen.value = false; return true }
+  return false
+})
 </script>
 
 <template>
@@ -536,10 +548,6 @@ function onTouchEnd() {
                 class="m-cell"
                 :style="{ width: cellSize + 'px', height: cellSize + 'px' }"
                 @click="openPhoto(p)"
-                @touchstart="onTouchStart(p)"
-                @touchend="onTouchEnd"
-                @touchcancel="onTouchEnd"
-                @touchmove="onTouchEnd"
               >
                 <LazyThumb :src="thumbOf(p)" :alt="p.name" aspect-ratio="1/1">
                   <template #fallback>
@@ -558,6 +566,22 @@ function onTouchEnd() {
     </main>
 
     <FolderPicker v-model="pickerOpen" :initial="folder" title="选择相册目录" @confirm="onMobilePickFolder" />
+
+    <!-- 移动端图片预览 -->
+    <van-image-preview
+      v-model:show="mPreviewOpen"
+      v-model:index="mPreviewIndex"
+      :images="mPreviewImages"
+      :closeable="true"
+      :show-index="true"
+    >
+      <template #cover>
+        <div class="m-preview-actions" :style="{ paddingBottom: `calc(var(--sl-safe-bottom) + 16px)` }">
+          <van-button size="small" round icon="down" @click="mDownloadCurrent">下载</van-button>
+          <van-button size="small" round icon="delete-o" type="danger" plain @click="mDeleteCurrent">删除</van-button>
+        </div>
+      </template>
+    </van-image-preview>
   </div>
 </template>
 
@@ -660,8 +684,17 @@ function onTouchEnd() {
 .m-cell {
   border-radius: 4px; overflow: hidden;
   background: var(--el-fill-color); flex-shrink: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 .m-cell:active { opacity: 0.7; }
+.m-preview-actions {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  display: flex; justify-content: center; gap: 12px;
+  padding: 16px;
+  z-index: 2;
+}
 .m-bottom-stat {
   text-align: center; padding: 16px 0 80px;
   font-size: 12px; color: var(--el-text-color-secondary);

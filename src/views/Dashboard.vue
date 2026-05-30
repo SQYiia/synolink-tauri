@@ -353,11 +353,11 @@ onUnmounted(() => {
   font-weight: 500;
 }
 
-/* Mobile-only tweaks */
+/* Mobile-only tweaks (shadcn-style) */
 .m-dash-grid-wrap {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+  gap: 8px;
   margin: 8px 12px;
 }
 .m-dash-tile {
@@ -365,22 +365,27 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  padding: 14px 4px;
-  background: var(--sl-bg-card);
+  padding: 16px 4px;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
   border-radius: 12px;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: background var(--sl-transition-fast);
+  transition: background var(--sl-transition-fast), border-color var(--sl-transition-fast);
 }
-.m-dash-tile:active { background: var(--el-fill-color-light); }
+.m-dash-tile:active {
+  background: hsl(var(--muted));
+  border-color: hsl(var(--border));
+}
 .m-dash-tile-icon {
-  width: 48px; height: 48px;
-  border-radius: 12px;
+  width: 40px; height: 40px;
+  border-radius: 10px;
   display: flex; align-items: center; justify-content: center;
 }
 .m-dash-tile-label {
   font-size: 12px;
-  color: var(--el-text-color-primary);
+  color: hsl(var(--foreground));
   font-weight: 500;
+  letter-spacing: -0.01em;
 }
 </style>

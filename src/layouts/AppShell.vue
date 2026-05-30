@@ -4,9 +4,10 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { dsm, setSessionRecoverer } from '../api/dsm'
 import { useAppStore } from '../stores/app'
-import { downloadQueue, cancelTask, removeTask, clearCompleted, downloadDir, revealSavedFile, chooseDownloadDir, resetDownloadDir, askEveryDownload, setAskEveryDownload } from '../composables/useDownloadQueue'
+import { downloadQueue, cancelTask, removeTask, clearCompleted, downloadDir, revealSavedFile, chooseDownloadDir, resetDownloadDir, askEveryDownload, setAskEveryDownload, canPickDownloadDir } from '../composables/useDownloadQueue'
 import { formatBytes } from '../utils/format'
 import { useIsMobile } from '../composables/useIsMobile'
+import { useEdgeSwipeBack } from '../composables/useEdgeSwipeBack'
 import FolderIcon from '../components/FolderIcon.vue'
 
 const route = useRoute()
@@ -118,6 +119,14 @@ const mobileTabs = [
 const activeTabIndex = computed(() => {
   const i = mobileTabs.findIndex(t => route.path.startsWith(t.to))
   return i === -1 ? 0 : i
+})
+
+// 全局边缘左滑返回：tab 路由下不返回，子页 router.back()
+useEdgeSwipeBack({
+  onBack: () => {
+    if (!isMobile.value) return
+    if (!route.meta?.tab) router.back()
+  },
 })
 
 const navTitle = computed(() => (route.meta?.title as string) || 'SynoLink')
@@ -351,12 +360,16 @@ function onTabChange(i: number) {
         <div class="m-dl-title">下载队列</div>
         <van-button v-if="downloadQueue.length" size="mini" plain @click="clearCompleted">清除已完成</van-button>
       </div>
-      <div class="m-dl-savedir">
+      <div v-if="canPickDownloadDir" class="m-dl-savedir">
         <div class="m-dl-savedir-label">保存位置</div>
         <div class="m-dl-savedir-path">{{ downloadDir || '默认 Downloads' }}</div>
         <van-button size="mini" plain @click="chooseDownloadDir">修改</van-button>
       </div>
-      <div class="m-dl-ask">
+      <div v-else class="m-dl-savedir m-dl-savedir-ios">
+        <van-icon name="info-o" size="14" />
+        <span>下载至 App 内 Documents</span>
+      </div>
+      <div v-if="canPickDownloadDir" class="m-dl-ask">
         <van-checkbox
           :model-value="askEveryDownload"
           @update:model-value="(v: boolean) => setAskEveryDownload(v)"
@@ -481,14 +494,14 @@ function onTabChange(i: number) {
 .dl-error { color: var(--el-color-danger); }
 .dl-actions { flex-shrink: 0; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
 
-/* ========== Mobile ========== */
+/* ========== Mobile (shadcn-style) ========== */
 .m-shell {
   height: 100vh;
   width: 100vw;
   max-width: 100vw;
   display: flex;
   flex-direction: column;
-  background: var(--sl-bg-page);
+  background: hsl(var(--background));
   overflow-x: hidden;
 }
 .m-content {
@@ -500,43 +513,63 @@ function onTabChange(i: number) {
 .m-booting {
   display: flex; align-items: center; justify-content: center;
   gap: 10px; height: 60vh;
-  color: var(--el-text-color-secondary); font-size: 14px;
+  color: hsl(var(--muted-foreground)); font-size: 14px;
 }
 .m-search-head { padding-top: 4px; }
 
 .m-navbar-actions {
-  display: flex; align-items: center; gap: 4px;
+  display: flex; align-items: center; gap: 2px;
 }
 .m-navbar-btn {
   width: 36px; height: 36px;
   display: flex; align-items: center; justify-content: center;
   background: transparent; border: none;
-  color: var(--el-text-color-primary);
-  border-radius: 18px;
+  color: hsl(var(--foreground));
+  border-radius: 8px;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
-.m-navbar-btn:active { background: var(--el-fill-color); }
+.m-navbar-btn:active { background: hsl(var(--muted)); }
 
 .m-dl-head {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 16px 8px;
+  padding: 16px 16px 10px;
 }
-.m-dl-title { font-size: 16px; font-weight: 600; }
+.m-dl-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+  letter-spacing: -0.01em;
+}
 .m-dl-savedir {
   display: flex; align-items: center; gap: 8px;
-  padding: 8px 16px; margin: 0 12px;
-  background: var(--el-fill-color-light); border-radius: 8px;
+  padding: 10px 12px; margin: 0 12px;
+  background: hsl(var(--muted));
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
 }
-.m-dl-savedir-label { font-size: 12px; color: var(--el-text-color-secondary); flex-shrink: 0; }
+.m-dl-savedir-ios {
+  font-size: 12px; color: hsl(var(--muted-foreground));
+  padding: 10px 14px;
+  display: flex; align-items: center; gap: 6px;
+}
+.m-dl-savedir-label { font-size: 11px; color: hsl(var(--muted-foreground)); flex-shrink: 0; }
 .m-dl-savedir-path {
   flex: 1; min-width: 0;
-  font-size: 12px; color: var(--el-text-color-primary);
+  font-size: 12px; color: hsl(var(--foreground));
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   direction: rtl; text-align: left;
 }
-.m-dl-ask { padding: 10px 16px; font-size: 13px; }
-.m-dl-name { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.m-dl-meta { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 2px; }
-.m-dl-error { color: var(--el-color-danger); }
+.m-dl-ask {
+  padding: 10px 16px;
+  font-size: 13px;
+  color: hsl(var(--foreground));
+}
+.m-dl-name {
+  font-size: 14px; font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: hsl(var(--foreground));
+}
+.m-dl-meta { font-size: 12px; color: hsl(var(--muted-foreground)); margin-top: 2px; }
+.m-dl-error { color: hsl(var(--destructive)); }
 </style>

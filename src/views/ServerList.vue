@@ -195,10 +195,10 @@ async function remove(id: string) {
 .card-remark { font-size: 12px; color: var(--el-text-color-placeholder); margin-top: 2px; }
 .card-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
 
-/* Mobile */
+/* Mobile (shadcn-style) */
 .m-page {
   min-height: 100vh;
-  background: var(--sl-bg-page);
+  background: hsl(var(--background));
   padding-bottom: var(--sl-safe-bottom);
   max-width: 100vw;
   overflow-x: hidden;
@@ -206,7 +206,8 @@ async function remove(id: string) {
 .m-empty { padding-top: 60px; }
 
 .m-srv-list {
-  background: var(--sl-bg-card);
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
   border-radius: 12px;
   margin: 12px;
   overflow: hidden;
@@ -215,14 +216,14 @@ async function remove(id: string) {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-  background: var(--sl-bg-card);
+  padding: 14px;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
   cursor: pointer;
   min-width: 0;
 }
 .m-srv-row:last-child { border-bottom: none; }
-.m-srv-row:active { background: var(--el-fill-color-light); }
+.m-srv-row:active { background: hsl(var(--muted)); }
 
 .m-srv-icon-wrap {
   position: relative;
@@ -230,17 +231,20 @@ async function remove(id: string) {
 }
 .m-srv-icon {
   width: 40px; height: 40px;
-  border-radius: 10px;
+  border-radius: 8px;
   display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  background: hsl(var(--brand) / 0.1) !important;
+  color: hsl(var(--brand));
 }
+.m-srv-icon :deep(.van-icon) { color: hsl(var(--brand)) !important; }
 .m-status-dot {
   position: absolute; bottom: -2px; right: -2px;
-  width: 12px; height: 12px; border-radius: 50%;
-  border: 2px solid var(--sl-bg-card); background: #909399;
+  width: 11px; height: 11px; border-radius: 50%;
+  border: 2px solid hsl(var(--card));
+  background: hsl(var(--muted-foreground));
 }
-.m-status-dot.online { background: #10B981; }
-.m-status-dot.offline { background: #EF4444; }
+.m-status-dot.online { background: hsl(142 71% 45%); }
+.m-status-dot.offline { background: hsl(var(--destructive)); }
 
 .m-srv-info {
   flex: 1;
@@ -250,21 +254,22 @@ async function remove(id: string) {
   gap: 2px;
 }
 .m-srv-name {
-  font-size: 15px; font-weight: 500;
-  color: var(--el-text-color-primary);
+  font-size: 15px; font-weight: 600;
+  color: hsl(var(--foreground));
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  letter-spacing: -0.01em;
 }
 .m-srv-url {
   font-size: 12px;
-  color: var(--el-text-color-secondary);
+  color: hsl(var(--muted-foreground));
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .m-srv-remark {
   font-size: 12px;
-  color: var(--el-text-color-placeholder);
+  color: hsl(var(--muted-foreground) / 0.7);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.m-srv-arrow { flex-shrink: 0; }
+.m-srv-arrow { flex-shrink: 0; color: hsl(var(--muted-foreground)) !important; }
 .m-srv-del { height: 100%; }
-.m-tip { text-align: center; color: var(--el-text-color-placeholder); font-size: 12px; margin-top: 16px; }
+.m-tip { text-align: center; color: hsl(var(--muted-foreground) / 0.7); font-size: 12px; margin-top: 16px; }
 </style>

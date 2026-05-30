@@ -3,6 +3,7 @@ import { ref, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { dsm } from '../api/dsm'
 import { useIsMobile } from '../composables/useIsMobile'
+import { useBackHandler } from '../composables/useEdgeSwipeBack'
 import { toast } from '../utils/feedback'
 import FileTypeIcon from './FileTypeIcon.vue'
 
@@ -156,6 +157,14 @@ watch(visible, async (v) => {
     selected.value = ''
     await mLoadShares()
   }
+})
+
+// 侧滑返回：picker 打开时优先级处理 — 有上级则返回上级，没有则关闭
+useBackHandler(() => {
+  if (!isMobile.value || !visible.value) return false
+  if (mCurrent.value) { void mBack(); return true }
+  visible.value = false
+  return true
 })
 </script>
 

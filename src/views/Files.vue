@@ -10,6 +10,7 @@ import { enqueue } from '../composables/useDownloadQueue'
 import FolderPicker from '../components/FolderPicker.vue'
 import FileTypeIcon from '../components/FileTypeIcon.vue'
 import { useIsMobile } from '../composables/useIsMobile'
+import { useBackHandler } from '../composables/useEdgeSwipeBack'
 import { confirm, prompt, toast } from '../utils/feedback'
 
 const router = useRouter()
@@ -294,6 +295,28 @@ async function crumbJump(idx: number) {
   const parts = crumbs.value.slice(0, idx + 1)
   await openFolder({ path: '/' + parts.join('/'), isdir: true })
 }
+
+/** 返回上一级目录：在子目录时返回到父目录；在共享根下不响应 */
+async function goUp() {
+  if (selectMode.value) { exitSelectMode(); return }
+  if (inSearchMode.value) { await exitSearch(); return }
+  if (!crumbs.value.length) return
+  if (crumbs.value.length === 1) {
+    await loadShares()
+    return
+  }
+  const parts = crumbs.value.slice(0, -1)
+  await openFolder({ path: '/' + parts.join('/'), isdir: true })
+}
+
+// 侧滑返回：消费"上级目录 / 退出选择 / 退出搜索"等场景，不让全局 fallback 跳出 tab
+useBackHandler(() => {
+  if (!isMobile.value) return false
+  if (selectMode.value) { exitSelectMode(); return true }
+  if (inSearchMode.value) { void exitSearch(); return true }
+  if (crumbs.value.length) { void goUp(); return true }
+  return false
+})
 
 async function doCreateFolder() {
   if (!path.value) {
@@ -728,8 +751,31 @@ function openMoreSheet() {
 
   <!-- ========== 移动端 ========== -->
   <div v-else class="m-files">
-    <!-- 顶部：面包屑（横滑、首尾渐变） + 搜索 -->
+    <!-- 顶部：返回 + 当前目录 + 面包屑 + 搜索 -->
     <div class="m-files-head">
+      <div class="m-files-bar">
+        <button
+          class="m-files-back"
+          :class="{ disabled: !crumbs.length }"
+          :disabled="!crumbs.length"
+          @click="goUp"
+          aria-label="返回上级"
+        >
+          <van-icon name="arrow-left" size="20" />
+        </button>
+        <div class="m-files-title">
+          {{ crumbs.length ? crumbs[crumbs.length - 1] : '共享文件夹' }}
+        </div>
+        <button
+          v-if="path"
+          class="m-files-fav"
+          :class="{ active: isFavorite(path) }"
+          @click="toggleFavorite(path)"
+          aria-label="收藏"
+        >
+          <van-icon :name="isFavorite(path) ? 'star' : 'star-o'" size="20" />
+        </button>
+      </div>
       <div class="m-crumbs-wrap">
         <div class="m-crumbs">
           <span class="m-crumb-item" @click="loadShares">
@@ -933,26 +979,64 @@ a { cursor: pointer; color: var(--sl-primary); }
 }
 .fav-tag { cursor: pointer; }
 
-/* ========== Mobile ========== */
+/* ========== Mobile (shadcn-style) ========== */
 .m-files {
   min-height: 100%;
   padding-bottom: 100px;
-  /* 关键：限制宽度，防溢出 */
   max-width: 100vw;
   overflow-x: hidden;
+  background: hsl(var(--background));
 }
 .m-files-head {
-  background: var(--sl-bg-card);
-  border-bottom: var(--sl-border);
+  background: hsl(var(--card));
+  border-bottom: 1px solid hsl(var(--border));
   position: sticky;
   top: 0;
   z-index: 8;
 }
+.m-files-bar {
+  display: flex; align-items: center;
+  padding: 8px 10px;
+  gap: 4px;
+}
+.m-files-back {
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: none;
+  color: hsl(var(--foreground));
+  border-radius: 8px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0;
+}
+.m-files-back:active { background: hsl(var(--muted)); }
+.m-files-back.disabled { color: hsl(var(--muted-foreground) / 0.4); cursor: default; }
+.m-files-title {
+  flex: 1; min-width: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  text-align: center;
+  letter-spacing: -0.01em;
+}
+.m-files-fav {
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: none;
+  color: hsl(var(--muted-foreground));
+  border-radius: 8px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0;
+}
+.m-files-fav:active { background: hsl(var(--muted)); }
+.m-files-fav.active { color: hsl(38 92% 50%); }
 
 /* 面包屑：横向滚动 + 两端渐变蒙板 */
 .m-crumbs-wrap {
   position: relative;
-  padding: 10px 0;
+  padding: 6px 0 10px;
 }
 .m-crumbs-wrap::before,
 .m-crumbs-wrap::after {
@@ -965,33 +1049,33 @@ a { cursor: pointer; color: var(--sl-primary); }
 }
 .m-crumbs-wrap::before {
   left: 0;
-  background: linear-gradient(to right, var(--sl-bg-card), transparent);
+  background: linear-gradient(to right, hsl(var(--card)), transparent);
 }
 .m-crumbs-wrap::after {
   right: 0;
-  background: linear-gradient(to left, var(--sl-bg-card), transparent);
+  background: linear-gradient(to left, hsl(var(--card)), transparent);
 }
 .m-crumbs {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: 4px;
   padding: 0 16px;
-  font-size: 14px;
+  font-size: 13px;
   overflow-x: auto;
   white-space: nowrap;
-  color: var(--el-text-color-regular);
+  color: hsl(var(--muted-foreground));
   scrollbar-width: none;
 }
 .m-crumbs::-webkit-scrollbar { display: none; }
 .m-crumb-item {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 6px;
+  gap: 3px;
+  padding: 3px 6px;
   border-radius: 6px;
   cursor: pointer;
   flex-shrink: 0;
 }
-.m-crumb-item.active { color: var(--sl-primary); font-weight: 600; }
-.m-crumb-sep { color: var(--el-text-color-placeholder); flex-shrink: 0; }
+.m-crumb-item.active { color: hsl(var(--foreground)); font-weight: 500; background: hsl(var(--muted)); }
+.m-crumb-sep { color: hsl(var(--muted-foreground) / 0.5); flex-shrink: 0; }
 
 .m-favs {
   display: flex; align-items: center; padding: 0 16px 10px;
@@ -1006,90 +1090,93 @@ a { cursor: pointer; color: var(--sl-primary); }
 .m-batch-bar {
   display: flex; align-items: center; gap: 6px;
   padding: 10px 12px;
-  background: var(--el-color-primary-light-9);
+  background: hsl(var(--muted));
+  border-bottom: 1px solid hsl(var(--border));
   position: sticky; top: 0; z-index: 9;
   font-size: 13px;
   flex-wrap: wrap;
 }
-.m-batch-info { flex: 1; min-width: 0; }
+.m-batch-info { flex: 1; min-width: 0; color: hsl(var(--foreground)); font-weight: 500; }
 
-/* iOS Files / DS file 风格的文件行 */
+/* shadcn-style 列表卡片 */
 .m-list {
-  background: var(--sl-bg-card);
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
   border-radius: 12px;
-  margin: 8px 12px;
+  margin: 10px 12px;
   overflow: hidden;
 }
 .m-row {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 12px 10px 14px;
-  background: var(--sl-bg-card);
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  padding: 12px 14px;
+  background: hsl(var(--card));
+  border-bottom: 1px solid hsl(var(--border));
   cursor: pointer;
   transition: background var(--sl-transition-fast);
   min-width: 0;
 }
 .m-row:last-child { border-bottom: none; }
-.m-row:active { background: var(--el-fill-color-light); }
-.m-row-selected { background: rgba(99, 102, 241, 0.08); }
+.m-row:active { background: hsl(var(--muted)); }
+.m-row-selected { background: hsl(var(--brand) / 0.06); }
 
 .m-row-left {
   flex-shrink: 0;
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .m-row-thumb {
-  width: 40px; height: 40px;
+  width: 36px; height: 36px;
   object-fit: cover;
-  border-radius: 8px;
-  background: var(--el-fill-color);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  border-radius: 6px;
+  background: hsl(var(--muted));
+  border: 1px solid hsl(var(--border));
 }
 
 .m-row-mid {
   flex: 1;
-  min-width: 0;          /* 关键：允许 flex 子元素收缩到 0，否则会撑破 */
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 .m-row-name {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 500;
-  color: var(--el-text-color-primary);
+  color: hsl(var(--foreground));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  line-height: 1.3;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
 }
 .m-row-meta {
   display: flex;
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--el-text-color-secondary);
+  color: hsl(var(--muted-foreground));
   line-height: 1.3;
 }
 .m-row-size, .m-row-date { flex-shrink: 0; }
-.m-row-dot { color: var(--el-text-color-placeholder); }
+.m-row-dot { color: hsl(var(--muted-foreground) / 0.5); }
 
 .m-row-action {
   flex-shrink: 0;
-  width: 36px; height: 36px;
+  width: 32px; height: 32px;
   display: flex; align-items: center; justify-content: center;
   background: transparent;
   border: none;
-  border-radius: 18px;
-  color: var(--el-text-color-secondary);
+  border-radius: 8px;
+  color: hsl(var(--muted-foreground));
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
-.m-row-action:active { background: var(--el-fill-color); }
+.m-row-action:active { background: hsl(var(--muted)); }
 
 .m-fab-group {
   position: fixed; right: 16px;
@@ -1098,9 +1185,10 @@ a { cursor: pointer; color: var(--sl-primary); }
 }
 .m-fab {
   width: 48px; height: 48px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 12px -2px hsl(240 5% 30% / 0.18);
+  border: 1px solid hsl(var(--border));
 }
-.m-fab-more { background: var(--sl-bg-card); }
+.m-fab-more { background: hsl(var(--card)) !important; color: hsl(var(--foreground)) !important; }
 
 .m-preview-body {
   flex: 1; display: flex; align-items: center; justify-content: center;

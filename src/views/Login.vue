@@ -213,24 +213,31 @@ function back() {
 .card-title { margin: 0; font-size: 18px; font-weight: 600; color: var(--el-text-color-primary); }
 .card-url { margin: 4px 0 0; font-size: 12px; color: var(--el-text-color-secondary); }
 
-/* Mobile */
+/* Mobile (shadcn-style) */
 .m-login {
   min-height: 100vh;
-  background: var(--sl-bg-page);
+  background: hsl(var(--background));
 }
 .m-login-body {
-  padding: 24px 0;
+  padding: 32px 0 16px;
   display: flex; flex-direction: column; align-items: center;
 }
 .m-login-avatar {
-  width: 80px; height: 80px;
-  background: var(--el-color-primary-light-9);
-  border-radius: 20px;
+  width: 64px; height: 64px;
+  background: hsl(var(--muted));
+  border: 1px solid hsl(var(--border));
+  border-radius: 16px;
   display: flex; align-items: center; justify-content: center;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
+  color: hsl(var(--foreground));
+}
+.m-login-avatar :deep(.van-icon) {
+  color: hsl(var(--foreground)) !important;
 }
 .m-login-url {
-  font-size: 13px; color: var(--el-text-color-secondary);
+  font-size: 13px;
+  color: hsl(var(--muted-foreground));
+  font-variant-numeric: tabular-nums;
 }
 .m-login-actions {
   padding: 24px 16px;

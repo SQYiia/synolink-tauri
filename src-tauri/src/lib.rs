@@ -156,13 +156,14 @@ async fn download_to_file(
         return Err("session not set".into());
     }
 
-    // 优先使用前端传入的保存目录，为空则回退系统默认 Downloads
+    // 优先使用前端传入的保存目录，为空则回退系统默认 Downloads（iOS 无 Downloads，回退到 Documents）
     let dl_dir = match save_dir.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
         Some(s) => std::path::PathBuf::from(s),
         None => app
             .path()
             .download_dir()
-            .map_err(|e| format!("download_dir: {}", e))?,
+            .or_else(|_| app.path().document_dir())
+            .map_err(|e| format!("download/document_dir: {}", e))?,
     };
     if !dl_dir.exists() {
         std::fs::create_dir_all(&dl_dir).map_err(|e| format!("create dir: {}", e))?;
@@ -348,7 +349,8 @@ fn get_default_download_dir(app: tauri::AppHandle) -> Result<String, String> {
     let dir = app
         .path()
         .download_dir()
-        .map_err(|e| format!("download_dir: {}", e))?;
+        .or_else(|_| app.path().document_dir())
+        .map_err(|e| format!("download/document_dir: {}", e))?;
     Ok(dir.to_string_lossy().to_string())
 }
 

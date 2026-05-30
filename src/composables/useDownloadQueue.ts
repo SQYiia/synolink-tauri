@@ -4,7 +4,9 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { ElMessage, ElNotification } from 'element-plus'
+import { showToast } from 'vant'
 import { h } from 'vue'
+import { isIOS } from '../utils/platform'
 
 export interface DownloadTask {
   id: string
@@ -31,13 +33,20 @@ export const downloadQueue = computed(() => state.tasks)
 const LS_KEY_SAVE_DIR = 'synolink.downloadDir'
 export const downloadDir = ref<string>(localStorage.getItem(LS_KEY_SAVE_DIR) || '')
 
-/** 每次下载前是否弹出目录选择器（默认 ON，用户可在下载抽屉中关闭） */
+/** 每次下载前是否弹出目录选择器（默认 ON，用户可在下载抽屉中关闭）
+ *  iOS 沙盒下不允许任意目录选择，强制关闭，直接走系统默认 Documents */
 const LS_KEY_ASK_EVERY = 'synolink.askEveryDownload'
-export const askEveryDownload = ref<boolean>(localStorage.getItem(LS_KEY_ASK_EVERY) !== '0')
+export const askEveryDownload = ref<boolean>(
+  isIOS ? false : localStorage.getItem(LS_KEY_ASK_EVERY) !== '0'
+)
 export function setAskEveryDownload(on: boolean) {
+  if (isIOS) return // iOS 不支持选目录
   askEveryDownload.value = on
   localStorage.setItem(LS_KEY_ASK_EVERY, on ? '1' : '0')
 }
+
+/** 平台是否允许用户任意选择下载目录 */
+export const canPickDownloadDir = !isIOS
 
 async function ensureDownloadDir() {
   if (downloadDir.value) return downloadDir.value
@@ -49,8 +58,13 @@ async function ensureDownloadDir() {
   return downloadDir.value
 }
 
-/** 弹出系统目录选择器，选定后更新全局下载目录并持久化。不会影响已在进行中的任务。 */
+/** 弹出系统目录选择器，选定后更新全局下载目录并持久化。不会影响已在进行中的任务。
+ *  iOS 沙盒不支持，直接返回 null + 提示 */
 export async function chooseDownloadDir(): Promise<string | null> {
+  if (!canPickDownloadDir) {
+    showToast('iOS 仅支持下载到 App 内的 Documents 目录')
+    return null
+  }
   try {
     const picked = await openDialog({
       directory: true,
@@ -77,8 +91,13 @@ export async function resetDownloadDir() {
   ElMessage.success('已恢复默认下载目录：' + downloadDir.value)
 }
 
-/** 打开文件所在目录并高亮选中。某些平台仅能打开目录不能高亮。 */
+/** 打开文件所在目录并高亮选中。某些平台仅能打开目录不能高亮。
+ *  iOS 无文件管理器概念，提示用户文件在 App 容器内即可。 */
 export async function revealSavedFile(savePath: string) {
+  if (isIOS) {
+    showToast({ message: '文件已保存到 App 内\n' + savePath, duration: 3000 })
+    return
+  }
   try {
     await revealItemInDir(savePath)
   } catch (e: any) {
@@ -115,19 +134,23 @@ async function doSetupListeners() {
       t.status = 'done'
       t.savePath = e.payload.savePath
       if (t.size > 0) t.loaded = t.size
-      ElNotification({
-        title: '下载完成',
-        message: h('div', [
-          h('div', { style: 'font-size:12px;word-break:break-all;color:var(--el-text-color-regular)' }, t.name),
-          h('div', { style: 'font-size:11px;color:var(--el-text-color-secondary);word-break:break-all;margin-top:2px' }, t.savePath || ''),
-          h('a', {
-            style: 'display:inline-block;margin-top:6px;font-size:12px;color:var(--el-color-primary);cursor:pointer',
-            onClick: () => t.savePath && revealSavedFile(t.savePath),
-          }, '打开所在目录'),
-        ]),
-        type: 'success',
-        duration: 5000,
-      })
+      if (isIOS) {
+        showToast({ message: `下载完成：${t.name}`, duration: 2200 })
+      } else {
+        ElNotification({
+          title: '下载完成',
+          message: h('div', [
+            h('div', { style: 'font-size:12px;word-break:break-all;color:var(--el-text-color-regular)' }, t.name),
+            h('div', { style: 'font-size:11px;color:var(--el-text-color-secondary);word-break:break-all;margin-top:2px' }, t.savePath || ''),
+            h('a', {
+              style: 'display:inline-block;margin-top:6px;font-size:12px;color:var(--el-color-primary);cursor:pointer',
+              onClick: () => t.savePath && revealSavedFile(t.savePath),
+            }, '打开所在目录'),
+          ]),
+          type: 'success',
+          duration: 5000,
+        })
+      }
       processQueue()
     }),
     await listen<ErrorPayload>('download:error', (e) => {
@@ -148,9 +171,9 @@ async function doSetupListeners() {
 
 export async function enqueue(path: string, name: string, size: number = 0, saveDir?: string) {
   await ensureListeners()
-  // 优先级：显式传入的 saveDir > “每次询问”弹选 > 全局 downloadDir > 系统默认
+  // 优先级：显式传入的 saveDir > "每次询问"弹选 > 全局 downloadDir > 系统默认
   let effectiveDir: string | undefined = saveDir?.trim() || undefined
-  if (!effectiveDir && askEveryDownload.value) {
+  if (!effectiveDir && askEveryDownload.value && canPickDownloadDir) {
     try {
       const picked = await openDialog({
         directory: true,
@@ -175,11 +198,15 @@ export async function enqueue(path: string, name: string, size: number = 0, save
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const task: DownloadTask = { id, path, name, size, loaded: 0, status: 'queued', saveDir: effectiveDir }
   state.tasks.unshift(task)
-  ElMessage({
-    type: 'info',
-    message: effectiveDir ? `已加入下载队列，保存到：${effectiveDir}` : '已加入下载队列',
-    duration: 2500,
-  })
+  if (isIOS) {
+    showToast({ message: `已加入下载队列：${name}`, duration: 1800 })
+  } else {
+    ElMessage({
+      type: 'info',
+      message: effectiveDir ? `已加入下载队列，保存到：${effectiveDir}` : '已加入下载队列',
+      duration: 2500,
+    })
+  }
   processQueue()
   return id
 }

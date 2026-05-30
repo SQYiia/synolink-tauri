@@ -22,19 +22,19 @@ interface IconDef {
   badge?: string
 }
 
-// Vant 图标列表：https://vant-ui.github.io/vant/#/zh-CN/icon
-// 注意：Vant 4 没有 folder 图标，所以 folder 用自定义 SVG
+// shadcn 风：纯色背景 + 单色描边图标，去掉渐变与浓饱和度
+// 颜色采用扁平化柔和色，与 muted/border 调性一致
 const ICONS: Record<string, IconDef> = {
-  folder:  { from: '#5B8CFF', to: '#3163E5', icon: '' /* 用 FolderIcon 组件 */ },
-  image:   { from: '#34D399', to: '#10B981', icon: 'photo-o' },
-  video:   { from: '#A78BFA', to: '#8B5CF6', icon: 'video-o' },
-  audio:   { from: '#F472B6', to: '#EC4899', icon: 'music-o' },
-  pdf:     { from: '#F87171', to: '#EF4444', icon: 'description', badge: 'PDF' },
-  archive: { from: '#FBBF24', to: '#F59E0B', icon: 'records' },
-  doc:     { from: '#60A5FA', to: '#3B82F6', icon: 'description' },
-  code:    { from: '#94A3B8', to: '#475569', icon: 'orders-o' },
-  text:    { from: '#9CA3AF', to: '#6B7280', icon: 'notes-o' },
-  generic: { from: '#9CA3AF', to: '#6B7280', icon: 'description' },
+  folder:  { from: '#3B82F6', to: '#3B82F6', icon: '' /* 用 FolderIcon 组件 */ },
+  image:   { from: '#10B981', to: '#10B981', icon: 'photo-o' },
+  video:   { from: '#8B5CF6', to: '#8B5CF6', icon: 'video-o' },
+  audio:   { from: '#EC4899', to: '#EC4899', icon: 'music-o' },
+  pdf:     { from: '#EF4444', to: '#EF4444', icon: 'description', badge: 'PDF' },
+  archive: { from: '#F59E0B', to: '#F59E0B', icon: 'records' },
+  doc:     { from: '#3B82F6', to: '#3B82F6', icon: 'description' },
+  code:    { from: '#64748B', to: '#64748B', icon: 'orders-o' },
+  text:    { from: '#6B7280', to: '#6B7280', icon: 'notes-o' },
+  generic: { from: '#71717A', to: '#71717A', icon: 'description' },
 }
 
 const IMAGE_EXT = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico', 'heic', 'heif']
@@ -76,12 +76,13 @@ const iconSize = computed(() => Math.round(size.value * 0.6))
       width: size + 'px',
       height: size + 'px',
       borderRadius: radius + 'px',
-      background: `linear-gradient(135deg, ${def.from}, ${def.to})`,
+      background: `${def.from}14`, /* 8% alpha tint */
+      color: def.from,
     }"
   >
-    <FolderIcon v-if="isDir" :size="iconSize" color="white" />
-    <van-icon v-else :name="def.icon" :size="iconSize" color="white" />
-    <span v-if="def.badge" class="ft-badge">{{ def.badge }}</span>
+    <FolderIcon v-if="isDir" :size="iconSize" :color="def.from" />
+    <van-icon v-else :name="def.icon" :size="iconSize" :color="def.from" />
+    <span v-if="def.badge" class="ft-badge" :style="{ background: def.from }">{{ def.badge }}</span>
   </div>
 </template>
 
@@ -92,20 +93,18 @@ const iconSize = computed(() => Math.round(size.value * 0.6))
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
-  color: white;
 }
 .ft-badge {
   position: absolute;
-  bottom: 1px;
-  right: 1px;
+  bottom: -2px;
+  right: -2px;
   font-size: 8px;
-  font-weight: 700;
-  color: rgba(255, 255, 255, 0.95);
-  background: rgba(0, 0, 0, 0.22);
+  font-weight: 600;
+  color: #fff;
   border-radius: 3px;
-  padding: 0 3px;
+  padding: 1px 3px;
   letter-spacing: 0.02em;
-  line-height: 1.4;
+  line-height: 1.2;
+  border: 1.5px solid hsl(var(--card));
 }
 </style>
