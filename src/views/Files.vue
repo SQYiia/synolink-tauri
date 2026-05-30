@@ -235,7 +235,7 @@ async function loadShares() {
   crumbs.value = []
   inSearchMode.value = false
   try {
-    const res = await dsm.listShare({ limit: 100, additional: 'real_path,owner,time,perm,mount_point_type,volume_status' })
+    const res = await dsm.listShare({ limit: 100, additional: '["real_path","owner","time","perm","mount_point_type","volume_status"]' })
     if (res.success) items.value = (res.data as any)?.shares ?? []
     else toast(`code=${res.error?.code}`, 'error')
   } finally {
@@ -247,7 +247,7 @@ async function loadCurrent() {
   if (!path.value) return loadShares()
   loading.value = true
   try {
-    const res = await dsm.listFiles(path.value, { limit: 500, additional: 'size,time,type,perm' })
+    const res = await dsm.listFiles(path.value, { limit: 500, additional: '["size","time","type","perm"]' })
     if (res.success) items.value = (res.data as any)?.files ?? []
     else toast(`code=${res.error?.code}`, 'error')
   } finally {
@@ -277,7 +277,7 @@ async function openFolder(row: any) {
   loading.value = true
   try {
     const target = row.path as string
-    const res = await dsm.listFiles(target, { limit: 500, additional: 'size,time,type,perm' })
+    const res = await dsm.listFiles(target, { limit: 500, additional: '["size","time","type","perm"]' })
     if (res.success) {
       items.value = (res.data as any)?.files ?? []
       path.value = target
