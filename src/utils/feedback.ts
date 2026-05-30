@@ -18,9 +18,9 @@ function isMobile() {
 
 export function toast(message: string, type: ToastType = 'info') {
   if (isMobile()) {
-    if (type === 'success') showSuccessToast(message)
-    else if (type === 'error') showFailToast(message)
-    else showToast(message)
+    if (type === 'success') showSuccessToast({ message, position: 'middle' })
+    else if (type === 'error') showFailToast({ message, position: 'middle' })
+    else showToast({ message, position: 'middle' })
     return
   }
   ElMessage({ message, type })
@@ -28,7 +28,7 @@ export function toast(message: string, type: ToastType = 'info') {
 
 export function toastLoading(message = '加载中...') {
   if (isMobile()) {
-    return showLoadingToast({ message, forbidClick: true, duration: 0 })
+    return showLoadingToast({ message, position: 'middle', forbidClick: true, duration: 0 })
   }
   return ElMessage({ message, type: 'info', duration: 0 })
 }

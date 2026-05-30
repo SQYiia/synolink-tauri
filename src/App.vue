@@ -400,6 +400,12 @@ body,
   border-radius: calc(var(--radius) - 2px) !important;
 }
 
+/* el-message: 居中显示 */
+.el-message {
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+}
+
 /* ===== Vant overrides ===== */
 .van-cell {
   --van-cell-vertical-padding: 12px;
