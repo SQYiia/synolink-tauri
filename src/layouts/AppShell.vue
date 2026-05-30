@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { dsm, setSessionRecoverer } from '../api/dsm'
 import { useAppStore } from '../stores/app'
-import { downloadQueue, cancelTask, removeTask, clearCompleted, downloadDir, revealSavedFile, chooseDownloadDir, resetDownloadDir, askEveryDownload, setAskEveryDownload, canPickDownloadDir } from '../composables/useDownloadQueue'
+import { downloadQueue, cancelTask, removeTask, clearCompleted, downloadDir, revealSavedFile, chooseDownloadDir, resetDownloadDir, askEveryDownload, setAskEveryDownload } from '../composables/useDownloadQueue'
 import { formatBytes } from '../utils/format'
 import { useIsMobile } from '../composables/useIsMobile'
 import { useEdgeSwipeBack } from '../composables/useEdgeSwipeBack'
@@ -104,16 +104,17 @@ const desktopTabs = [
   { to: '/app/album', label: '相册', icon: 'Picture' },
   { to: '/app/videos', label: '视频', icon: 'VideoCamera' },
   { to: '/app/downloads', label: '下载站', icon: 'Connection' },
+  { to: '/app/monitor', label: '性能', icon: 'Odometer' },
   { to: '/app/vmm', label: '虚拟机', icon: 'Monitor' },
-  { to: '/app/me', label: '我的', icon: 'User' },
+  { to: '/app/me', label: '设置', icon: 'User' },
 ]
 
 const mobileTabs = [
   { to: '/app/dashboard', label: '首页', icon: 'wap-home-o' },
   { to: '/app/files', label: '文件', icon: 'folder' /* 自定义 SVG */ },
   { to: '/app/album', label: '相册', icon: 'photo-o' },
-  { to: '/app/downloads', label: '下载', icon: 'down' },
-  { to: '/app/me', label: '我的', icon: 'user-o' },
+  { to: '/app/monitor', label: '性能', icon: 'bar-chart-o' },
+  { to: '/app/me', label: '设置', icon: 'setting-o' },
 ]
 
 const activeTabIndex = computed(() => {
@@ -360,16 +361,12 @@ function onTabChange(i: number) {
         <div class="m-dl-title">下载队列</div>
         <van-button v-if="downloadQueue.length" size="mini" plain @click="clearCompleted">清除已完成</van-button>
       </div>
-      <div v-if="canPickDownloadDir" class="m-dl-savedir">
+      <div class="m-dl-savedir">
         <div class="m-dl-savedir-label">保存位置</div>
-        <div class="m-dl-savedir-path">{{ downloadDir || '默认 Downloads' }}</div>
+        <div class="m-dl-savedir-path">{{ downloadDir || '默认 Documents/Downloads' }}</div>
         <van-button size="mini" plain @click="chooseDownloadDir">修改</van-button>
       </div>
-      <div v-else class="m-dl-savedir m-dl-savedir-ios">
-        <van-icon name="info-o" size="14" />
-        <span>下载至 App 内 Documents</span>
-      </div>
-      <div v-if="canPickDownloadDir" class="m-dl-ask">
+      <div class="m-dl-ask">
         <van-checkbox
           :model-value="askEveryDownload"
           @update:model-value="(v: boolean) => setAskEveryDownload(v)"

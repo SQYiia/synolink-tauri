@@ -15,8 +15,9 @@ const routes = [
       { path: 'album', component: () => import('../views/Album.vue'), meta: { title: '相册', tab: true } },
       { path: 'videos', component: () => import('../views/Videos.vue'), meta: { title: '视频' } },
       { path: 'downloads', component: () => import('../views/Downloads.vue'), meta: { title: '下载', tab: true } },
+      { path: 'monitor', component: () => import('../views/Monitor.vue'), meta: { title: '性能', tab: true } },
       { path: 'vmm', component: () => import('../views/Vmm.vue'), meta: { title: '虚拟机' } },
-      { path: 'me', component: () => import('../views/Me.vue'), meta: { title: '我的', tab: true } },
+      { path: 'me', component: () => import('../views/Me.vue'), meta: { title: '设置', tab: true } },
     ],
   },
 ]

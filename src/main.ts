@@ -13,6 +13,7 @@ import {
   Calendar,
   Coin,
   Connection,
+  DataLine,
   Delete,
   Document,
   Download,
@@ -20,6 +21,7 @@ import {
   HomeFilled,
   Loading,
   Monitor,
+  Odometer,
   Picture,
   Plus,
   Refresh,
@@ -34,6 +36,7 @@ import {
 
 import App from './App.vue'
 import { router } from './router'
+import './composables/useNavDirection' // 注册 router.beforeEach 监听导航方向
 
 const app = createApp(App)
 app.use(createPinia())
@@ -48,6 +51,7 @@ const icons = {
   Calendar,
   Coin,
   Connection,
+  DataLine,
   Delete,
   Document,
   Download,
@@ -55,6 +59,7 @@ const icons = {
   HomeFilled,
   Loading,
   Monitor,
+  Odometer,
   Picture,
   Plus,
   Refresh,

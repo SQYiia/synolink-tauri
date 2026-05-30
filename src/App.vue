@@ -1,31 +1,13 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted } from 'vue'
 import { useAppStore } from './stores/app'
+import { initTheme } from './composables/useTheme'
 
 const app = useAppStore()
 
-/** 根据系统主题切换 <html class="dark"> */
-let mql: MediaQueryList | null = null
-function applyTheme(isDark: boolean) {
-  const html = document.documentElement
-  if (isDark) html.classList.add('dark')
-  else html.classList.remove('dark')
-}
-function onMqlChange(e: MediaQueryListEvent) {
-  applyTheme(e.matches)
-}
-
 onMounted(() => {
   app.load()
-  mql = window.matchMedia('(prefers-color-scheme: dark)')
-  applyTheme(mql.matches)
-  mql.addEventListener('change', onMqlChange)
-})
-
-onUnmounted(() => {
-  if (mql) {
-    mql.removeEventListener('change', onMqlChange)
-  }
+  initTheme()
 })
 </script>
 
@@ -358,7 +340,7 @@ body,
   background: hsl(var(--muted)) !important;
 }
 
-/* ===== Page Transitions ===== */
+/* ===== Page Transitions (iOS-style slide) ===== */
 .page-fade-enter-active,
 .page-fade-leave-active {
   transition: opacity var(--sl-transition-normal);
@@ -367,6 +349,30 @@ body,
 .page-fade-leave-to {
   opacity: 0;
 }
+
+/* 前进：新页从右滑入；旧页向左轻退淡出 */
+.slide-fwd-enter-active {
+  transition: transform 240ms cubic-bezier(0.32, 0.72, 0, 1), opacity 200ms ease-out;
+}
+.slide-fwd-leave-active {
+  transition: transform 200ms cubic-bezier(0.32, 0.72, 0, 1), opacity 150ms ease-in;
+}
+.slide-fwd-enter-from { transform: translateX(28%); opacity: 0; }
+.slide-fwd-leave-to { transform: translateX(-12%); opacity: 0; }
+
+/* 后退：新页从左滑入；旧页向右滑出 */
+.slide-back-enter-active {
+  transition: transform 240ms cubic-bezier(0.32, 0.72, 0, 1), opacity 200ms ease-out;
+}
+.slide-back-leave-active {
+  transition: transform 200ms cubic-bezier(0.32, 0.72, 0, 1), opacity 150ms ease-in;
+}
+.slide-back-enter-from { transform: translateX(-12%); opacity: 0; }
+.slide-back-leave-to { transform: translateX(28%); opacity: 0; }
+
+/* 同位/初次：快速淡入 */
+.fade-quick-enter-active, .fade-quick-leave-active { transition: opacity 120ms ease; }
+.fade-quick-enter-from, .fade-quick-leave-to { opacity: 0; }
 
 /* ===== Custom Scrollbar ===== */
 ::-webkit-scrollbar { width: 6px; height: 6px; }

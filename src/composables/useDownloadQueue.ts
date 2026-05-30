@@ -33,20 +33,21 @@ export const downloadQueue = computed(() => state.tasks)
 const LS_KEY_SAVE_DIR = 'synolink.downloadDir'
 export const downloadDir = ref<string>(localStorage.getItem(LS_KEY_SAVE_DIR) || '')
 
-/** 每次下载前是否弹出目录选择器（默认 ON，用户可在下载抽屉中关闭）
- *  iOS 沙盒下不允许任意目录选择，强制关闭，直接走系统默认 Documents */
+/** 每次下载前是否弹出目录选择器（默认：桌面 ON，移动端 OFF） */
 const LS_KEY_ASK_EVERY = 'synolink.askEveryDownload'
+const _savedAskEvery = typeof localStorage !== 'undefined' ? localStorage.getItem(LS_KEY_ASK_EVERY) : null
 export const askEveryDownload = ref<boolean>(
-  isIOS ? false : localStorage.getItem(LS_KEY_ASK_EVERY) !== '0'
+  _savedAskEvery === null ? !isIOS : _savedAskEvery !== '0'
 )
 export function setAskEveryDownload(on: boolean) {
-  if (isIOS) return // iOS 不支持选目录
   askEveryDownload.value = on
   localStorage.setItem(LS_KEY_ASK_EVERY, on ? '1' : '0')
 }
 
-/** 平台是否允许用户任意选择下载目录 */
-export const canPickDownloadDir = !isIOS
+/** 平台是否允许用户任意选择下载目录。
+ *  iOS 也开放尝试：tauri-plugin-dialog 在 iOS 会调用 UIDocumentPickerViewController，
+ *  失败/取消时 chooseDownloadDir 自己处理。 */
+export const canPickDownloadDir = true
 
 async function ensureDownloadDir() {
   if (downloadDir.value) return downloadDir.value
@@ -58,13 +59,10 @@ async function ensureDownloadDir() {
   return downloadDir.value
 }
 
-/** 弹出系统目录选择器，选定后更新全局下载目录并持久化。不会影响已在进行中的任务。
- *  iOS 沙盒不支持，直接返回 null + 提示 */
+/** 弹出系统目录选择器，选定后更新全局下载目录并持久化。
+ *  iOS：通过 UIDocumentPickerViewController 选择「文件」App 中的目录（含 iCloud Drive、On My iPhone）。
+ *  若用户取消或系统不支持，回退到 App 内 Documents。 */
 export async function chooseDownloadDir(): Promise<string | null> {
-  if (!canPickDownloadDir) {
-    showToast('iOS 仅支持下载到 App 内的 Documents 目录')
-    return null
-  }
   try {
     const picked = await openDialog({
       directory: true,
@@ -75,10 +73,13 @@ export async function chooseDownloadDir(): Promise<string | null> {
     if (!picked || Array.isArray(picked)) return null
     downloadDir.value = picked
     localStorage.setItem(LS_KEY_SAVE_DIR, picked)
-    ElMessage.success('下载目录已更新：' + picked)
+    if (isIOS) showToast('已设置下载目录')
+    else ElMessage.success('下载目录已更新：' + picked)
     return picked
   } catch (e: any) {
-    ElMessage.error('选择目录失败：' + (e?.message ?? e))
+    const msg = e?.message ?? String(e)
+    if (isIOS) showToast({ message: '系统不支持选目录：' + msg, duration: 2400 })
+    else ElMessage.error('选择目录失败：' + msg)
     return null
   }
 }
@@ -173,7 +174,7 @@ export async function enqueue(path: string, name: string, size: number = 0, save
   await ensureListeners()
   // 优先级：显式传入的 saveDir > "每次询问"弹选 > 全局 downloadDir > 系统默认
   let effectiveDir: string | undefined = saveDir?.trim() || undefined
-  if (!effectiveDir && askEveryDownload.value && canPickDownloadDir) {
+  if (!effectiveDir && askEveryDownload.value) {
     try {
       const picked = await openDialog({
         directory: true,

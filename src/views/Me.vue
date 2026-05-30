@@ -7,6 +7,8 @@ import { dsm } from '../api/dsm'
 import { formatBytes, formatSpeed } from '../utils/format'
 import { useIsMobile } from '../composables/useIsMobile'
 import { confirm, toast } from '../utils/feedback'
+import { useTheme, type ThemeMode } from '../composables/useTheme'
+import type { ActionSheetAction } from 'vant'
 
 const router = useRouter()
 const app = useAppStore()
@@ -233,6 +235,29 @@ async function logout() {
 function switchServer() {
   router.replace('/servers')
 }
+
+// 主题
+const { mode: themeMode, setMode } = useTheme()
+const themeLabel: Record<ThemeMode, string> = {
+  auto: '跟随系统',
+  light: '浅色',
+  dark: '深色',
+}
+
+const themeSheetOpen = ref(false)
+const themeSheetActions: ActionSheetAction[] = [
+  { name: themeLabel.auto },
+  { name: themeLabel.light },
+  { name: themeLabel.dark },
+]
+function openThemeSheet() {
+  themeSheetOpen.value = true
+}
+function onThemeSelect(_a: ActionSheetAction, idx: number) {
+  const m: ThemeMode = idx === 0 ? 'auto' : idx === 1 ? 'light' : 'dark'
+  setMode(m)
+  themeSheetOpen.value = false
+}
 </script>
 
 <template>
@@ -373,95 +398,30 @@ function switchServer() {
     </div>
   </div>
 
-  <!-- 移动端 -->
+  <!-- 移动端：纯设置页 -->
   <div v-else class="m-me">
     <!-- 头像 / 账户区 -->
     <div class="m-profile-card">
       <div class="m-avatar">
-        <van-icon name="manager" size="28" />
+        <van-icon name="manager" size="24" />
       </div>
       <div class="m-profile-info">
         <div class="m-profile-name">{{ app.accounts.find(a => a.id === app.currentAccountId)?.account || '未登录' }}</div>
         <div class="m-profile-sub">{{ dsm.baseUrl || '—' }}</div>
       </div>
-      <van-icon name="replay" size="20" @click="refreshAll" />
     </div>
 
-    <!-- 系统状态 -->
-    <div class="m-group-title">
-      <span>系统状态</span>
-      <span class="m-group-right">{{ lastUpdate || '—' }}</span>
-    </div>
+    <!-- 外观 -->
+    <div class="m-group-title"><span>外观</span></div>
     <van-cell-group inset>
-      <van-cell title="CPU 使用率" :value="cpuPct + '%'" />
-      <van-cell title="内存使用">
-        <template #value>
-          <span>{{ memPct }}% · {{ formatBytes(memUsed) }} / {{ formatBytes(memTotal) }}</span>
-        </template>
-      </van-cell>
-      <van-cell title="网络">
-        <template #value>
-          <span>↑ {{ formatSpeed(netSend) }} · ↓ {{ formatSpeed(netRecv) }}</span>
-        </template>
-      </van-cell>
-      <van-cell title="磁盘 I/O">
-        <template #value>
-          <span>R {{ formatSpeed(diskRead) }} · W {{ formatSpeed(diskWrite) }}</span>
-        </template>
-      </van-cell>
+      <van-cell title="主题" :value="themeLabel[themeMode]" is-link clickable @click="openThemeSheet" />
     </van-cell-group>
-
-    <!-- 存储卷 -->
-    <template v-if="volumes.length">
-      <div class="m-group-title"><span>存储</span></div>
-      <van-cell-group inset>
-        <van-cell v-for="v in volumes" :key="v.id ?? v.volume_path ?? v._name">
-          <template #title>
-            <div class="m-vol-row">
-              <span class="m-vol-name">{{ v._name }}</span>
-              <span class="m-vol-pct">{{ volPct(v) }}%</span>
-            </div>
-            <van-progress
-              :percentage="volPct(v)"
-              :color="pctColor(volPct(v))"
-              :show-pivot="false"
-              stroke-width="4"
-              style="margin-top: 6px"
-            />
-            <div class="m-vol-detail">{{ formatBytes(v._used) }} / {{ formatBytes(v._size) }}</div>
-          </template>
-        </van-cell>
-      </van-cell-group>
-    </template>
-
-    <!-- 磁盘健康 -->
-    <template v-if="disks.length">
-      <div class="m-group-title"><span>磁盘</span></div>
-      <van-cell-group inset>
-        <van-cell v-for="d in disks" :key="d.id ?? d._name">
-          <template #title>
-            <div class="m-vol-row">
-              <span class="m-vol-name">{{ d._name }}</span>
-              <span
-                class="m-disk-status"
-                :class="String(d._status).toLowerCase() === 'normal' ? 'ok' : 'warn'"
-              >{{ d._status || '未知' }}</span>
-            </div>
-            <div class="m-vol-detail">
-              <span v-if="d._model">{{ d._model }}</span>
-              <span v-if="d._temp"> · {{ d._temp }}°C</span>
-              <span v-if="d._size"> · {{ formatBytes(d._size) }}</span>
-            </div>
-          </template>
-        </van-cell>
-      </van-cell-group>
-    </template>
 
     <!-- 账户信息 -->
     <div class="m-group-title"><span>账户</span></div>
     <van-cell-group inset>
       <van-cell title="共享文件夹" :value="String(sharesCount)" />
-      <van-cell title="SynoToken" :value="dsm.synoToken ? '已注入' : '未下发'" />
+      <van-cell title="会话状态" :value="dsm.synoToken ? '已连接' : '未连接'" />
     </van-cell-group>
 
     <!-- 缓存 -->
@@ -495,10 +455,18 @@ function switchServer() {
     <div class="m-group-title"><span>操作</span></div>
     <van-cell-group inset>
       <van-cell title="切换服务器" is-link clickable @click="switchServer" />
-      <van-cell title="注销登录" is-link clickable @click="logout" title-style="color: var(--el-color-danger)" />
+      <van-cell title="注销登录" is-link clickable @click="logout" class="m-danger-cell" />
     </van-cell-group>
 
     <div class="m-bottom-pad" />
+
+    <van-action-sheet
+      v-model:show="themeSheetOpen"
+      :actions="themeSheetActions"
+      cancel-text="取消"
+      close-on-click-action
+      @select="onThemeSelect"
+    />
   </div>
 </template>
 
@@ -634,4 +602,5 @@ function switchServer() {
 .m-disk-status.ok { background: hsl(142 71% 45% / 0.08); color: hsl(142 71% 30%); border-color: hsl(142 71% 45% / 0.2); }
 .m-disk-status.warn { background: hsl(var(--destructive) / 0.08); color: hsl(var(--destructive)); border-color: hsl(var(--destructive) / 0.2); }
 .m-bottom-pad { height: 30px; }
+.m-danger-cell :deep(.van-cell__title) { color: hsl(var(--destructive)); }
 </style>
