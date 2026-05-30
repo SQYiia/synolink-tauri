@@ -26,6 +26,17 @@ async function checkAll() {
   }
 }
 
+const refreshing = ref(false)
+async function onPullRefresh() {
+  refreshing.value = true
+  try {
+    await app.load()
+    await checkAll()
+  } finally {
+    refreshing.value = false
+  }
+}
+
 async function checkServer(s: ServerConfig) {
   const url = `${s.protocol}://${s.host}:${s.port}/webapi/query.cgi?api=SYNO.API.Info&version=1&method=query`
   try {
@@ -115,13 +126,14 @@ async function remove(id: string) {
       </template>
     </van-nav-bar>
 
-    <div v-if="list.length === 0" class="m-empty">
-      <van-empty description="还没有服务器">
-        <van-button round type="primary" @click="add">添加服务器</van-button>
-      </van-empty>
-    </div>
+    <van-pull-refresh v-model="refreshing" @refresh="onPullRefresh">
+      <div v-if="list.length === 0" class="m-empty">
+        <van-empty description="还没有服务器">
+          <van-button round type="primary" @click="add">添加服务器</van-button>
+        </van-empty>
+      </div>
 
-    <div v-else class="m-srv-list">
+      <div v-else class="m-srv-list">
       <van-swipe-cell v-for="s in list" :key="s.id">
         <div class="m-srv-row" @click="pick(s.id)">
           <div class="m-srv-icon-wrap">
@@ -144,9 +156,10 @@ async function remove(id: string) {
           <van-button square type="danger" text="删除" class="m-srv-del" @click="remove(s.id)" />
         </template>
       </van-swipe-cell>
-    </div>
+      </div>
 
-    <div v-if="list.length" class="m-tip">左滑可删除</div>
+      <div v-if="list.length" class="m-tip">左滑可删除 · 下拉刷新</div>
+    </van-pull-refresh>
   </div>
 </template>
 

@@ -64,10 +64,17 @@ async function handlePowerOff(guest: VmmGuest) {
 onMounted(() => {
   startPolling(5000)
 })
+
+const refreshing = ref(false)
+async function onPullRefresh() {
+  refreshing.value = true
+  try { await refresh() } finally { refreshing.value = false }
+}
 </script>
 
 <template>
   <div class="vmm-page">
+    <van-pull-refresh v-model="refreshing" @refresh="onPullRefresh" :disabled="!isMobile">
     <!-- 未安装提示 -->
     <div v-if="!available" class="vmm-unavailable">
       <el-icon :size="40"><Monitor /></el-icon>
@@ -214,6 +221,7 @@ onMounted(() => {
       close-on-click-action
       @select="onSheetSelect"
     />
+    </van-pull-refresh>
   </div>
 </template>
 

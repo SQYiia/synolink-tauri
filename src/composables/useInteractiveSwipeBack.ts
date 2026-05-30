@@ -1,26 +1,86 @@
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, getCurrentInstance, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue'
+import { router } from '../router'
 
 type BackHandler = () => boolean | void | Promise<boolean | void>
 const backHandlerStack: BackHandler[] = []
 
-export async function triggerBack(fallback: () => void): Promise<boolean> {
+interface UseSwipeOptions {
+  /** 当所有页面级 BackHandler 都未消费时调用；返回 false 表示不应有返回行为
+   *  （例如已在 tab 根、再 back 就会跳出 /app 到登录页）。 */
+  fallback?: () => boolean | void
+  /** 在触摸起始时判断当前是否允许激活 swipe。返回 false 直接 bail，连动画都不起。
+   *  典型场景：tab 根 + 无 BackHandler 注册 → 没有有意义的"返回"，干脆不滑。 */
+  canSwipe?: () => boolean
+}
+
+// ============ 路由级快照缓存（用于 swipe 时贴在底层显示"上一页"）============
+
+/** 导航历史栈（fullPath），用于知道侧滑要回到哪个路由的快照 */
+const navStack: string[] = []
+/** 路由快照缓存：fullPath → 离开该路由那一刻 m-shell 的 DOM clone */
+const routeSnapshots = new Map<string, HTMLElement>()
+const MAX_SNAPSHOTS = 10
+
+router.afterEach((to) => {
+  navStack.push(to.fullPath)
+  if (navStack.length > MAX_SNAPSHOTS * 2) navStack.shift()
+})
+
+router.beforeEach((_to, from) => {
+  // 离开 from 时拍一份 m-shell 当前 DOM —— 此时 DOM 还是 from 的内容
+  if (from.fullPath && from.name) {
+    const shell = document.querySelector('.m-shell') as HTMLElement | null
+    if (shell) {
+      const clone = shell.cloneNode(true) as HTMLElement
+      clone.classList.remove('m-swiping', 'm-swipe-transition')
+      routeSnapshots.set(from.fullPath, clone)
+      // GC：超过上限淘汰最早的
+      if (routeSnapshots.size > MAX_SNAPSHOTS) {
+        const firstKey = routeSnapshots.keys().next().value
+        if (firstKey) routeSnapshots.delete(firstKey)
+      }
+    }
+  }
+  return true
+})
+
+export async function triggerBack(fallback: () => boolean | void): Promise<boolean> {
   for (let i = backHandlerStack.length - 1; i >= 0; i--) {
     try {
       const handled = await backHandlerStack[i]()
       if (handled === true) return true
     } catch { /* swallow */ }
   }
-  fallback()
-  return false
+  // fallback 返回 false 表示不应执行返回（例如在 tab 根上）
+  const r = fallback()
+  return r === false ? false : false
 }
 
+/** 注册一个页面级 BackHandler。
+ *  keep-alive 友好：当页面被切换离开（onDeactivated）时自动从栈里移除，
+ *  回到该页面（onActivated）时重新加入。否则切到别的 tab 后仍能误触发返回。 */
 export function useBackHandler(fn: BackHandler) {
-  onMounted(() => { backHandlerStack.push(fn) })
-  onUnmounted(() => {
+  const push = () => {
+    if (!backHandlerStack.includes(fn)) backHandlerStack.push(fn)
+  }
+  const pop = () => {
     const i = backHandlerStack.lastIndexOf(fn)
     if (i >= 0) backHandlerStack.splice(i, 1)
-  })
+  }
+  // 只在组件实例存在时挂钩 lifecycle（避免被错误调用）
+  if (getCurrentInstance()) {
+    onMounted(push)
+    onActivated(push)
+    onDeactivated(pop)
+    onUnmounted(pop)
+  } else {
+    push()
+  }
+}
+
+/** 当前是否有任何页面级 BackHandler 注册（用于 canSwipe 判断） */
+export function hasBackHandler(): boolean {
+  return backHandlerStack.length > 0
 }
 
 const swipeActive = ref(false)
@@ -54,24 +114,65 @@ const COMMIT_PROGRESS = 0.35
 // 提交速度阈值（px/s），即使位移不够，速度够也提交
 const COMMIT_VELOCITY = 500
 
-export function useInteractiveSwipeBack() {
-  const router = useRouter()
+export function useInteractiveSwipeBack(opts: UseSwipeOptions = {}) {
+  const fallback = opts.fallback ?? (() => { /* no-op default */ })
+  const canSwipe = opts.canSwipe ?? (() => true)
 
   let startX = 0
   let startY = 0
   let tracking = false
   let startTime = 0
+  /** swipe 期间贴在 m-shell 底层的"上一页快照"DOM */
+  let snapshotEl: HTMLElement | null = null
+
+  /** 在 swipe 开始时使用「上一路由的快照」作为底层背景。
+   *  只有当 routeSnapshots 里有真实的前驱快照时才贴；
+   *  没有时让背景色直接露出（不再 clone 当前页，避免"两份当前页"的视觉假象）。 */
+  function attachSnapshot() {
+    const container = document.querySelector('.m-shell-container') as HTMLElement | null
+    if (!container || snapshotEl) return
+
+    const prevPath = navStack.length >= 2 ? navStack[navStack.length - 2] : null
+    if (!prevPath || !routeSnapshots.has(prevPath)) {
+      // 没有真实的上一页快照 —— 留空底背景（页面 BackHandler 场景就是这样）
+      return
+    }
+    const clone = routeSnapshots.get(prevPath)!.cloneNode(true) as HTMLElement
+
+    clone.classList.add('m-prev-snapshot')
+    clone.classList.remove('m-swiping', 'm-swipe-transition')
+    // 关键：translateZ(0) 让 clone 成为 fixed 子元素的 containing block，
+    // 否则 cloned navbar/tabbar (position: fixed) 会跑回 viewport 跟实时 navbar 重叠
+    clone.style.cssText = `
+      position: absolute; inset: 0; z-index: 0;
+      transform: translateZ(0) !important; transition: none !important;
+      pointer-events: none;
+    `
+    container.insertBefore(clone, container.firstChild)
+    snapshotEl = clone
+  }
+
+  function detachSnapshot() {
+    snapshotEl?.remove()
+    snapshotEl = null
+  }
 
   function onTouchStart(e: TouchEvent) {
     if (isTransitioning.value) return
     if (e.touches.length !== 1) return
     const t = e.touches[0]
-    if (t.clientX <= EDGE_PX) {
-      tracking = true
-      startX = t.clientX
-      startY = t.clientY
-      startTime = Date.now()
-    }
+    if (t.clientX > EDGE_PX) return
+    // 没有真正的"上一页"——既无页面 handler 又 fallback 拒绝（tab 根）→ 不允许 swipe，
+    // 避免出现"两份当前页"的视觉假象
+    if (!canSwipe()) return
+    tracking = true
+    startX = t.clientX
+    startY = t.clientY
+    startTime = Date.now()
+  }
+
+  function ensureSnapshotOnActivate() {
+    if (!snapshotEl) attachSnapshot()
   }
 
   function onTouchMove(e: TouchEvent) {
@@ -89,6 +190,7 @@ export function useInteractiveSwipeBack() {
       }
       swipeActive.value = true
       swipeProgress.value = 0
+      ensureSnapshotOnActivate()
     } else {
       // 激活后：用户突然转竖滑 → 取消并回弹
       if (dy > POST_ACTIVATE_DY_MIN && dy / Math.max(dx, 1) > POST_ACTIVATE_RATIO_MAX) {
@@ -116,28 +218,42 @@ export function useInteractiveSwipeBack() {
     }
   }
 
-  /** 提交：松手当下立即切换路由 / 调用 handler，新内容在当前 swipe 位置出现，
-   *  然后短促回弹到 0 — 不再露出黑色背景。 */
+  /** 提交：先尝试页面级 BackHandler；如未消费则交由 fallback 决定是否 router.back。
+   *  fallback 返回 false（表示当前在 tab 根，不该跳出 /app）则视为取消回弹。 */
   async function completeSwipe() {
     swipeActive.value = false
-    // 保留当前 swipeProgress（不要先滑出 100%，会露黑底）
     const fromProgress = swipeProgress.value
 
-    // 切换路由 / 调用页面 BackHandler — 内容立即换成"上一页"
-    await triggerBack(() => {
-      if (window.history.length > 1) router.back()
-    })
-    await nextTick()
+    // 1. 先问页面级 handler
+    let handled = false
+    for (let i = backHandlerStack.length - 1; i >= 0; i--) {
+      try {
+        const r = await backHandlerStack[i]()
+        if (r === true) { handled = true; break }
+      } catch { /* ignore */ }
+    }
 
-    // 现在新内容已渲染在当前 transform 位置（用户看到的是新页面在被"推开"的位置）
-    // 启用过渡，从 fromProgress 回弹到 0
-    isTransitioning.value = true
-    swipeProgress.value = fromProgress // 显式保持（避免 v-if 切换时丢值）
-    // 下一帧才设 0，确保 transition 触发
-    await nextTick()
-    swipeProgress.value = 0
-    await waitForTransitionEnd()
-    isTransitioning.value = false
+    // 2. 没人接管 → 问 fallback；fallback 返回 false 表示"不返回"
+    let didNav = handled
+    if (!handled) {
+      const r = fallback()
+      didNav = r !== false
+    }
+
+    if (didNav) {
+      // 路由/内容已变，进入回弹动画（snapshot 还在底层，新内容跟着回弹）
+      await nextTick()
+      isTransitioning.value = true
+      swipeProgress.value = fromProgress
+      await nextTick()
+      swipeProgress.value = 0
+      await waitForTransitionEnd()
+      isTransitioning.value = false
+      detachSnapshot()
+    } else {
+      // 没有任何返回行为，直接像取消那样回弹（cancelSwipe 内会 detachSnapshot）
+      cancelSwipe()
+    }
   }
 
   /** 取消：带过渡回弹到 0 */
@@ -145,7 +261,10 @@ export function useInteractiveSwipeBack() {
     swipeActive.value = false
     isTransitioning.value = true
     swipeProgress.value = 0
-    waitForTransitionEnd().then(resetState)
+    waitForTransitionEnd().then(() => {
+      detachSnapshot()
+      resetState()
+    })
   }
 
   function waitForTransitionEnd(): Promise<void> {

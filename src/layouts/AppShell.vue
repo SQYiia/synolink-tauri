@@ -124,7 +124,22 @@ const activeTabIndex = computed(() => {
 })
 
 // 全局边缘左滑返回：交互式跟手动画（仅移动端）
-useInteractiveSwipeBack()
+// canSwipe 决定能不能激活；fallback 决定无 BackHandler 时 router.back 是否合适
+import { hasBackHandler } from '../composables/useInteractiveSwipeBack'
+useInteractiveSwipeBack({
+  canSwipe: () => {
+    // 1. 页面级 BackHandler 自己说能（Files 深目录、Album 预览开着 等）
+    if (hasBackHandler()) return true
+    // 2. 不在 tab 根 且 history 有上一项可退 → 走 router.back 路径
+    if (!route.meta?.tab && window.history.length > 1) return true
+    return false
+  },
+  fallback: () => {
+    if (route.meta?.tab) return false
+    if (window.history.length > 1) router.back()
+    return true
+  },
+})
 
 const navTitle = computed(() => (route.meta?.title as string) || 'SynoLink')
 const showNavBack = computed(() => !route.meta?.tab)

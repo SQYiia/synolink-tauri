@@ -9,7 +9,7 @@ import FolderPicker from '../components/FolderPicker.vue'
 import { useIsMobile } from '../composables/useIsMobile'
 import { confirm } from '../utils/feedback'
 
-const { tasks, statistic, loading, available, reason, startPolling, retry, createTask, createTaskFile, pauseTasks, resumeTasks, deleteTasks } = useDownloadStation()
+const { tasks, statistic, loading, available, reason, startPolling, retry, refresh: dsRefresh, createTask, createTaskFile, pauseTasks, resumeTasks, deleteTasks } = useDownloadStation()
 
 const selected = ref<DSTask[]>([])
 const createOpen = ref(false)
@@ -212,10 +212,17 @@ function closeBTSearch() {
 onMounted(() => {
   startPolling(3000)
 })
+
+const refreshing = ref(false)
+async function onPullRefresh() {
+  refreshing.value = true
+  try { await dsRefresh() } finally { refreshing.value = false }
+}
 </script>
 
 <template>
   <div class="ds-page">
+    <van-pull-refresh v-model="refreshing" @refresh="onPullRefresh" :disabled="!isMobile">
     <!-- 未安装提示 -->
     <div v-if="!available" class="ds-unavailable">
       <el-icon :size="40"><Connection /></el-icon>
@@ -433,6 +440,7 @@ onMounted(() => {
 
     <!-- 目录选择器 -->
     <FolderPicker v-model="destPickerOpen" @confirm="onDestPicked" />
+    </van-pull-refresh>
   </div>
 </template>
 
