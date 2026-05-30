@@ -1,15 +1,19 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { onMounted, ref, computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { dsm, setSessionRecoverer } from '../api/dsm'
 import { useAppStore } from '../stores/app'
 import { downloadQueue, cancelTask, removeTask, clearCompleted, downloadDir, revealSavedFile, chooseDownloadDir, resetDownloadDir, askEveryDownload, setAskEveryDownload } from '../composables/useDownloadQueue'
 import { formatBytes } from '../utils/format'
+import { useIsMobile } from '../composables/useIsMobile'
+import FolderIcon from '../components/FolderIcon.vue'
 
+const route = useRoute()
 const router = useRouter()
 const app = useAppStore()
 const booting = ref(true)
+const isMobile = useIsMobile()
 
 // 全局搜索
 const globalSearchOpen = ref(false)
@@ -52,7 +56,6 @@ async function doGlobalSearch() {
 
 function goToResult(item: any) {
   globalSearchOpen.value = false
-  // Navigate to Files view with the folder of the result
   const filePath = item.path as string
   const folder = filePath.substring(0, filePath.lastIndexOf('/')) || '/'
   router.push({ path: '/app/files', query: { open: folder } })
@@ -77,10 +80,8 @@ async function reloginFromStore(): Promise<boolean> {
 
 onMounted(async () => {
   await app.load()
-  // 注册全局会话恢复器：dsm.request 遇到 code=119 会自动回调
   setSessionRecoverer(reloginFromStore)
 
-  // 刷新 / 重启后单例被重置，自动重建会话
   if (!dsm.sid) {
     if (!app.currentAccountId || !app.currentServerId) {
       router.replace('/servers')
@@ -97,7 +98,7 @@ onMounted(async () => {
   booting.value = false
 })
 
-const tabs = [
+const desktopTabs = [
   { to: '/app/files', label: '文件', icon: 'Folder' },
   { to: '/app/album', label: '相册', icon: 'Picture' },
   { to: '/app/videos', label: '视频', icon: 'VideoCamera' },
@@ -107,23 +108,36 @@ const tabs = [
 ]
 
 const mobileTabs = [
-  { to: '/app/dashboard', label: '首页', icon: 'HomeFilled' },
-  { to: '/app/me', label: '我的', icon: 'User' },
+  { to: '/app/dashboard', label: '首页', icon: 'wap-home-o' },
+  { to: '/app/files', label: '文件', icon: 'folder' /* 自定义 SVG */ },
+  { to: '/app/album', label: '相册', icon: 'photo-o' },
+  { to: '/app/downloads', label: '下载', icon: 'down' },
+  { to: '/app/me', label: '我的', icon: 'user-o' },
 ]
 
-const isMobile = ref(window.innerWidth <= 640)
-function onResize() { isMobile.value = window.innerWidth <= 640 }
-onMounted(() => window.addEventListener('resize', onResize))
-onUnmounted(() => window.removeEventListener('resize', onResize))
-const visibleTabs = computed(() => isMobile.value ? mobileTabs : tabs)
+const activeTabIndex = computed(() => {
+  const i = mobileTabs.findIndex(t => route.path.startsWith(t.to))
+  return i === -1 ? 0 : i
+})
+
+const navTitle = computed(() => (route.meta?.title as string) || 'SynoLink')
+const showNavBack = computed(() => !route.meta?.tab)
+function navBack() {
+  if (window.history.length > 1) router.back()
+  else router.replace('/app/dashboard')
+}
+function onTabChange(i: number) {
+  router.replace(mobileTabs[i].to)
+}
 </script>
 
 <template>
-  <div class="app-shell">
+  <!-- ========== 桌面端 ========== -->
+  <div v-if="!isMobile" class="app-shell">
     <aside class="sidebar">
       <div class="sidebar-nav">
         <RouterLink
-          v-for="t in visibleTabs"
+          v-for="t in desktopTabs"
           :key="t.to"
           :to="t.to"
           class="nav-item"
@@ -243,9 +257,149 @@ const visibleTabs = computed(() => isMobile.value ? mobileTabs : tabs)
       </div>
     </el-drawer>
   </div>
+
+  <!-- ========== 移动端 ========== -->
+  <div v-else class="m-shell">
+    <van-nav-bar
+      :title="navTitle"
+      :left-arrow="showNavBack"
+      fixed
+      placeholder
+      safe-area-inset-top
+    >
+      <template #left>
+        <van-icon v-if="showNavBack" name="arrow-left" size="20" @click="navBack" />
+      </template>
+      <template #right>
+        <div class="m-navbar-actions">
+          <button class="m-navbar-btn" @click="globalSearchOpen = true" aria-label="搜索">
+            <van-icon name="search" size="20" />
+          </button>
+          <button class="m-navbar-btn" @click="downloadDrawerOpen = true" aria-label="下载">
+            <van-icon name="down" size="20" />
+          </button>
+        </div>
+      </template>
+    </van-nav-bar>
+
+    <main class="m-content">
+      <div v-if="booting" class="m-booting">
+        <van-loading size="24" />
+        <span>正在恢复会话…</span>
+      </div>
+      <RouterView v-else v-slot="{ Component }">
+        <keep-alive :max="3">
+          <component :is="Component" :key="$route.path" />
+        </keep-alive>
+      </RouterView>
+    </main>
+
+    <van-tabbar
+      :model-value="activeTabIndex"
+      fixed
+      safe-area-inset-bottom
+      placeholder
+      active-color="#6366F1"
+      inactive-color="#909399"
+      @change="onTabChange"
+    >
+      <van-tabbar-item v-for="t in mobileTabs" :key="t.to">
+        <span>{{ t.label }}</span>
+        <template #icon>
+          <FolderIcon v-if="t.icon === 'folder'" :size="22" />
+          <van-icon v-else :name="t.icon" size="22" />
+        </template>
+      </van-tabbar-item>
+    </van-tabbar>
+
+    <!-- 全局搜索 popup -->
+    <van-popup v-model:show="globalSearchOpen" position="top" round :style="{ height: '85vh', paddingTop: 'var(--sl-safe-top)' }">
+      <div class="m-search-head">
+        <van-search
+          v-model="globalSearchQuery"
+          placeholder="搜索所有文件夹"
+          show-action
+          @search="doGlobalSearch"
+        >
+          <template #action>
+            <div @click="globalSearchOpen = false">取消</div>
+          </template>
+        </van-search>
+      </div>
+      <van-loading v-if="globalSearching" style="text-align: center; padding: 40px 0" />
+      <van-empty v-else-if="!globalSearchResults.length && globalSearchQuery" description="暂无结果" />
+      <van-cell-group v-else inset>
+        <van-cell
+          v-for="r in globalSearchResults"
+          :key="r.path"
+          :title="r.name"
+          :label="r.path"
+          is-link
+          @click="goToResult(r)"
+        />
+      </van-cell-group>
+    </van-popup>
+
+    <!-- 下载队列 popup -->
+    <van-popup
+      v-model:show="downloadDrawerOpen"
+      position="bottom"
+      round
+      :style="{ height: '75vh', paddingBottom: 'var(--sl-safe-bottom)' }"
+    >
+      <div class="m-dl-head">
+        <div class="m-dl-title">下载队列</div>
+        <van-button v-if="downloadQueue.length" size="mini" plain @click="clearCompleted">清除已完成</van-button>
+      </div>
+      <div class="m-dl-savedir">
+        <div class="m-dl-savedir-label">保存位置</div>
+        <div class="m-dl-savedir-path">{{ downloadDir || '默认 Downloads' }}</div>
+        <van-button size="mini" plain @click="chooseDownloadDir">修改</van-button>
+      </div>
+      <div class="m-dl-ask">
+        <van-checkbox
+          :model-value="askEveryDownload"
+          @update:model-value="(v: boolean) => setAskEveryDownload(v)"
+          shape="square"
+        >
+          每次下载前询问保存目录
+        </van-checkbox>
+      </div>
+      <van-empty v-if="!downloadQueue.length" description="暂无下载任务" />
+      <van-cell-group v-else inset>
+        <van-cell v-for="t in downloadQueue" :key="t.id">
+          <template #title>
+            <div class="m-dl-name">{{ t.name }}</div>
+            <div class="m-dl-meta">
+              <span v-if="t.status === 'downloading'">{{ formatBytes(t.loaded) }} / {{ t.size ? formatBytes(t.size) : '未知' }}</span>
+              <span v-else-if="t.status === 'done'">已完成</span>
+              <span v-else-if="t.status === 'error'" class="m-dl-error">失败: {{ t.error }}</span>
+              <span v-else-if="t.status === 'cancelled'">已取消</span>
+              <span v-else>排队中</span>
+            </div>
+            <van-progress
+              v-if="t.status === 'downloading' && t.size"
+              :percentage="Math.round((t.loaded / t.size) * 100)"
+              :show-pivot="false"
+              stroke-width="3"
+              style="margin-top: 4px"
+            />
+          </template>
+          <template #value>
+            <van-button v-if="t.status === 'downloading' || t.status === 'queued'" size="mini" type="warning" @click="cancelTask(t.id)">取消</van-button>
+            <template v-else>
+              <van-button v-if="t.status === 'done' && t.savePath" size="mini" type="primary" plain @click="revealSavedFile(t.savePath)">打开</van-button>
+              <van-button size="mini" plain @click="removeTask(t.id)">移除</van-button>
+            </template>
+          </template>
+        </van-cell>
+      </van-cell-group>
+    </van-popup>
+  </div>
 </template>
 
 <style scoped>
+/* ========== Desktop ========== */
 .app-shell {
   display: flex;
   flex-direction: row;
@@ -253,7 +407,6 @@ const visibleTabs = computed(() => isMobile.value ? mobileTabs : tabs)
   background: var(--el-bg-color-page);
 }
 
-/* Sidebar */
 .sidebar {
   width: 56px;
   flex-shrink: 0;
@@ -263,108 +416,28 @@ const visibleTabs = computed(() => isMobile.value ? mobileTabs : tabs)
   border-right: var(--sl-border);
   padding: 8px 0;
 }
-.sidebar-nav {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 4px 0;
-}
-.sidebar-bottom {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 4px 0;
-  border-top: var(--sl-border);
-}
+.sidebar-nav { flex: 1; display: flex; flex-direction: column; gap: 2px; padding: 4px 0; }
+.sidebar-bottom { display: flex; flex-direction: column; gap: 2px; padding: 4px 0; border-top: var(--sl-border); }
 .nav-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  padding: 8px 0;
-  margin: 0 6px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; padding: 8px 0; margin: 0 6px;
   border-radius: var(--sl-radius-sm);
-  color: var(--el-text-color-secondary);
-  text-decoration: none;
-  font-size: 10px;
-  cursor: pointer;
+  color: var(--el-text-color-secondary); text-decoration: none;
+  font-size: 10px; cursor: pointer;
   transition: background var(--sl-transition-fast), color var(--sl-transition-fast);
   position: relative;
 }
-.nav-item:hover {
-  background: var(--el-fill-color-light);
-  color: var(--el-text-color-primary);
-}
-.nav-item.active {
-  color: var(--sl-primary);
-  background: var(--el-color-primary-light-9);
-}
+.nav-item:hover { background: var(--el-fill-color-light); color: var(--el-text-color-primary); }
+.nav-item.active { color: var(--sl-primary); background: var(--el-color-primary-light-9); }
 .nav-item.active::before {
-  content: '';
-  position: absolute;
-  left: -6px;
-  top: 8px;
-  bottom: 8px;
-  width: 3px;
-  border-radius: 0 2px 2px 0;
-  background: var(--sl-primary);
+  content: ''; position: absolute; left: -6px; top: 8px; bottom: 8px;
+  width: 3px; border-radius: 0 2px 2px 0; background: var(--sl-primary);
 }
 
-/* Mobile: sidebar → bottom tab bar */
-@media (max-width: 640px) {
-  .app-shell {
-    flex-direction: column-reverse;
-  }
-  .sidebar {
-    width: 100%;
-    flex-direction: row;
-    border-right: none;
-    border-top: var(--sl-border);
-    padding: 0;
-    height: 52px;
-  }
-  .sidebar-nav {
-    flex-direction: row;
-    justify-content: space-around;
-    padding: 0;
-    gap: 0;
-  }
-  .sidebar-bottom {
-    display: none;
-  }
-  .nav-item {
-    margin: 0;
-    padding: 6px 0;
-    flex: 1;
-    border-radius: 0;
-  }
-  .nav-item.active::before {
-    left: 25%;
-    right: 25%;
-    top: 0;
-    bottom: auto;
-    width: auto;
-    height: 2px;
-    border-radius: 0 0 2px 2px;
-  }
-}
-
-/* Content */
-.content {
-  flex: 1;
-  overflow: auto;
-  min-width: 0;
-}
+.content { flex: 1; overflow: auto; min-width: 0; }
 .booting {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  height: 100%;
-  color: var(--el-text-color-secondary);
-  font-size: 13px;
+  display: flex; align-items: center; justify-content: center;
+  gap: 8px; height: 100%; color: var(--el-text-color-secondary); font-size: 13px;
 }
 
 /* Global search */
@@ -384,8 +457,7 @@ const visibleTabs = computed(() => isMobile.value ? mobileTabs : tabs)
 .dl-savedir {
   display: flex; align-items: center; gap: 8px;
   padding: 8px 10px; margin-bottom: 10px;
-  background: var(--el-fill-color-light);
-  border-radius: var(--sl-radius-sm);
+  background: var(--el-fill-color-light); border-radius: var(--sl-radius-sm);
 }
 .dl-savedir-label { font-size: 11px; color: var(--el-text-color-secondary); flex-shrink: 0; }
 .dl-savedir-path {
@@ -408,4 +480,63 @@ const visibleTabs = computed(() => isMobile.value ? mobileTabs : tabs)
 }
 .dl-error { color: var(--el-color-danger); }
 .dl-actions { flex-shrink: 0; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
+
+/* ========== Mobile ========== */
+.m-shell {
+  height: 100vh;
+  width: 100vw;
+  max-width: 100vw;
+  display: flex;
+  flex-direction: column;
+  background: var(--sl-bg-page);
+  overflow-x: hidden;
+}
+.m-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+.m-booting {
+  display: flex; align-items: center; justify-content: center;
+  gap: 10px; height: 60vh;
+  color: var(--el-text-color-secondary); font-size: 14px;
+}
+.m-search-head { padding-top: 4px; }
+
+.m-navbar-actions {
+  display: flex; align-items: center; gap: 4px;
+}
+.m-navbar-btn {
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: none;
+  color: var(--el-text-color-primary);
+  border-radius: 18px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.m-navbar-btn:active { background: var(--el-fill-color); }
+
+.m-dl-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px 8px;
+}
+.m-dl-title { font-size: 16px; font-weight: 600; }
+.m-dl-savedir {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 16px; margin: 0 12px;
+  background: var(--el-fill-color-light); border-radius: 8px;
+}
+.m-dl-savedir-label { font-size: 12px; color: var(--el-text-color-secondary); flex-shrink: 0; }
+.m-dl-savedir-path {
+  flex: 1; min-width: 0;
+  font-size: 12px; color: var(--el-text-color-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  direction: rtl; text-align: left;
+}
+.m-dl-ask { padding: 10px 16px; font-size: 13px; }
+.m-dl-name { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-dl-meta { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 2px; }
+.m-dl-error { color: var(--el-color-danger); }
 </style>

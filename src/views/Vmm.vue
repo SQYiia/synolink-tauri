@@ -1,7 +1,31 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
-import { ElMessageBox } from 'element-plus'
+import { onMounted, ref } from 'vue'
+import type { ActionSheetAction } from 'vant'
 import { useVmm, getVmmStatusLabel, type VmmGuest } from '../composables/useVmm'
+import { useIsMobile } from '../composables/useIsMobile'
+import { confirm } from '../utils/feedback'
+
+const isMobile = useIsMobile()
+
+const sheetOpen = ref(false)
+const sheetActions = ref<ActionSheetAction[]>([])
+function openGuestActions(g: VmmGuest) {
+  const actions: ActionSheetAction[] = []
+  if (g.status === 'shutdown' || g.status === 'crashed') {
+    actions.push({ name: '开机', callback: () => powerOn(g.guestId) } as any)
+  }
+  if (g.status === 'running') {
+    actions.push({ name: '关机', callback: () => shutdown(g.guestId) } as any)
+    actions.push({ name: '强制关机', color: '#EF4444', callback: () => handlePowerOff(g) } as any)
+  }
+  if (!actions.length) return
+  sheetActions.value = actions
+  sheetOpen.value = true
+}
+function onSheetSelect(action: ActionSheetAction) {
+  sheetOpen.value = false
+  ;(action as any).callback?.()
+}
 
 const { guests, hosts, storages, loading, available, startPolling, refresh, powerOn, shutdown, powerOff } = useVmm()
 
@@ -28,11 +52,12 @@ async function handleShutdown(guest: VmmGuest) {
 }
 
 async function handlePowerOff(guest: VmmGuest) {
-  await ElMessageBox.confirm(
+  const ok = await confirm(
     `强制关机「${guest.guestName}」？相当于直接断电，可能导致数据丢失。`,
     '强制关机',
-    { type: 'warning' },
+    { danger: true, confirmText: '强制关机' },
   )
+  if (!ok) return
   await powerOff(guest.guestId)
 }
 
@@ -52,8 +77,8 @@ onMounted(() => {
     </div>
 
     <template v-else>
-      <!-- 顶部栏 -->
-      <div class="vmm-header">
+      <!-- 顶部栏（桌面） -->
+      <div v-if="!isMobile" class="vmm-header">
         <div class="vmm-header-left">
           <h3 class="vmm-title">虚拟机</h3>
           <el-icon v-if="loading" class="is-loading" :size="14"><Loading /></el-icon>
@@ -111,7 +136,8 @@ onMounted(() => {
               </div>
             </div>
             <div v-if="g.description" class="vmm-card-desc">{{ g.description }}</div>
-            <div class="vmm-card-actions">
+            <!-- 桌面操作按钮 -->
+            <div v-if="!isMobile" class="vmm-card-actions">
               <el-button
                 v-if="g.status === 'shutdown' || g.status === 'crashed'"
                 size="small"
@@ -134,6 +160,20 @@ onMounted(() => {
               <span v-if="isTransitioning(g.status)" class="vmm-card-wait">
                 <el-icon class="is-loading"><Loading /></el-icon>
                 <span style="font-size: 12px; margin-left: 4px">处理中…</span>
+              </span>
+            </div>
+            <!-- 移动端单一 "操作" 按钮，点开 ActionSheet -->
+            <div v-else class="vmm-card-actions">
+              <van-button
+                v-if="!isTransitioning(g.status)"
+                size="small"
+                type="primary"
+                plain
+                @click="openGuestActions(g)"
+              >操作</van-button>
+              <span v-else class="vmm-card-wait">
+                <van-loading size="14" />
+                <span style="font-size: 12px; margin-left: 6px">处理中…</span>
               </span>
             </div>
           </div>
@@ -165,6 +205,15 @@ onMounted(() => {
         </div>
       </div>
     </template>
+
+    <van-action-sheet
+      v-if="isMobile"
+      v-model:show="sheetOpen"
+      :actions="sheetActions"
+      cancel-text="取消"
+      close-on-click-action
+      @select="onSheetSelect"
+    />
   </div>
 </template>
 

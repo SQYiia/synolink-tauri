@@ -1,15 +1,23 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { showImagePreview } from 'vant'
+import type { ActionSheetAction } from 'vant'
 import { dsm } from '../api/dsm'
 import { formatBytes } from '../utils/format'
 import { enqueue } from '../composables/useDownloadQueue'
 import FolderPicker from '../components/FolderPicker.vue'
+import FileTypeIcon from '../components/FileTypeIcon.vue'
+import { useIsMobile } from '../composables/useIsMobile'
+import { confirm, prompt, toast } from '../utils/feedback'
 
 const router = useRouter()
 const route = useRoute()
+const isMobile = useIsMobile()
+
 const loading = ref(false)
+const refreshing = ref(false)
 const path = ref<string>('')
 const items = ref<any[]>([])
 const sortKey = ref<'name' | 'size' | 'time'>('name')
@@ -38,16 +46,13 @@ function onSortChange({ prop, order }: { prop: string; order: string | null }) {
 const crumbs = ref<string[]>([])
 const uploadInput = ref<HTMLInputElement | null>(null)
 
-// 缩略图：path -> blob URL
 const thumbs = ref<Record<string, string>>({})
-let thumbGen = 0 // 防止旧请求覆盖新目录
+let thumbGen = 0
 
-// 搜索
 const searchPattern = ref('')
 const searchTaskId = ref('')
 const inSearchMode = ref(false)
 
-// 预览
 const previewOpen = ref(false)
 const previewTitle = ref('')
 const previewType = ref<'image' | 'video' | 'audio' | 'text' | 'other'>('other')
@@ -57,14 +62,26 @@ const previewLoading = ref(false)
 
 const canUpload = computed(() => !!path.value && !inSearchMode.value)
 
-// 批量选择
 const selection = ref<any[]>([])
 function onSelectionChange(rows: any[]) { selection.value = rows }
 
-// 拖拽上传
+// 移动端选择模式
+const selectMode = ref(false)
+const selectedPaths = ref<Set<string>>(new Set())
+function toggleSelect(row: any) {
+  const p = row.path
+  if (selectedPaths.value.has(p)) selectedPaths.value.delete(p)
+  else selectedPaths.value.add(p)
+  selectedPaths.value = new Set(selectedPaths.value)
+}
+function exitSelectMode() {
+  selectMode.value = false
+  selectedPaths.value = new Set()
+}
+const selectedRows = computed(() => sortedItems.value.filter(r => selectedPaths.value.has(r.path)))
+
 const dragging = ref(false)
 
-// 收藏夹
 const FAVORITES_KEY = 'files:favorites'
 const favorites = ref<string[]>(loadFavorites())
 
@@ -82,7 +99,6 @@ function toggleFavorite(p: string) {
 }
 function isFavorite(p: string) { return favorites.value.includes(p) }
 
-// 复制/移动
 const copyMovePickerOpen = ref(false)
 const copyMoveMode = ref<'copy' | 'move'>('copy')
 const copyMovePaths = ref<string[]>([])
@@ -100,10 +116,9 @@ async function onCopyMoveConfirm(dest: string) {
   try {
     const res = await dsm.copyMove(copyMovePaths.value, dest, false, copyMoveMode.value === 'move')
     if (!res.success || !res.data?.taskid) {
-      ElMessage.error(`操作失败 code=${res.error?.code}`)
+      toast(`操作失败 code=${res.error?.code}`, 'error')
       return
     }
-    // 轮询等待任务完成
     const taskid = res.data.taskid
     const MAX_WAIT = 60000
     const POLL = 1000
@@ -118,64 +133,64 @@ async function onCopyMoveConfirm(dest: string) {
       if (data?.error) break
     }
     if (!finished) {
-      ElMessage.warning('操作超时或失败，请手动确认')
+      toast('操作超时或失败，请手动确认', 'warning')
       await loadCurrent()
       return
     }
-    ElMessage.success(copyMoveMode.value === 'move' ? '移动成功' : '复制成功')
+    toast(copyMoveMode.value === 'move' ? '移动成功' : '复制成功', 'success')
     await loadCurrent()
   } finally {
     loading.value = false
   }
 }
 
-// 批量操作
 async function batchDelete() {
-  if (!selection.value.length) return
+  const rows = isMobile.value ? selectedRows.value : selection.value
+  if (!rows.length) return
+  const ok = await confirm(`确定删除选中的 ${rows.length} 个项目？该操作不可撤销。`, '批量删除', { danger: true, confirmText: '删除' })
+  if (!ok) return
+  loading.value = true
   try {
-    await ElMessageBox.confirm(`确定删除选中的 ${selection.value.length} 个项目？该操作不可撤销。`, '批量删除', {
-      type: 'warning',
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
-    })
-    loading.value = true
-    const paths = selection.value.map((r) => r.path)
+    const paths = rows.map((r) => r.path)
     const res = await dsm.deletePath(paths)
     if (res.success) {
-      ElMessage.success(`已删除 ${paths.length} 个项目`)
+      toast(`已删除 ${paths.length} 个项目`, 'success')
       await loadCurrent()
+      if (isMobile.value) exitSelectMode()
     } else {
-      ElMessage.error(`删除失败 code=${res.error?.code}`)
+      toast(`删除失败 code=${res.error?.code}`, 'error')
     }
-  } catch {
   } finally {
     loading.value = false
   }
 }
 
 function batchDownload() {
-  if (!selection.value.length) return
+  const rows = isMobile.value ? selectedRows.value : selection.value
+  if (!rows.length) return
   let count = 0
-  for (const row of selection.value) {
+  for (const row of rows) {
     if (!isRowDir(row)) {
       enqueue(row.path, row.name, Number(row.additional?.size || 0))
       count++
     }
   }
-  if (count) ElMessage.success(`已添加 ${count} 个文件到下载队列`)
+  if (count) toast(`已添加 ${count} 个文件到下载队列`, 'success')
+  if (isMobile.value) exitSelectMode()
 }
 
 function batchCopy() {
-  if (!selection.value.length) return
-  startCopyMove('copy', selection.value.map((r) => r.path))
+  const rows = isMobile.value ? selectedRows.value : selection.value
+  if (!rows.length) return
+  startCopyMove('copy', rows.map((r) => r.path))
 }
 
 function batchMove() {
-  if (!selection.value.length) return
-  startCopyMove('move', selection.value.map((r) => r.path))
+  const rows = isMobile.value ? selectedRows.value : selection.value
+  if (!rows.length) return
+  startCopyMove('move', rows.map((r) => r.path))
 }
 
-// 拖拽上传处理
 function onDragOver(e: DragEvent) {
   e.preventDefault()
   if (canUpload.value) dragging.value = true
@@ -221,7 +236,7 @@ async function loadShares() {
   try {
     const res = await dsm.listShare({ limit: 100, additional: 'real_path,owner,time,perm,mount_point_type,volume_status' })
     if (res.success) items.value = (res.data as any)?.shares ?? []
-    else ElMessage.error(`code=${res.error?.code}`)
+    else toast(`code=${res.error?.code}`, 'error')
   } finally {
     loading.value = false
   }
@@ -233,13 +248,26 @@ async function loadCurrent() {
   try {
     const res = await dsm.listFiles(path.value, { limit: 500, additional: 'size,time,type,perm' })
     if (res.success) items.value = (res.data as any)?.files ?? []
-    else ElMessage.error(`code=${res.error?.code}`)
+    else toast(`code=${res.error?.code}`, 'error')
   } finally {
     loading.value = false
   }
 }
 
+async function onPullRefresh() {
+  refreshing.value = true
+  try {
+    await loadCurrent()
+  } finally {
+    refreshing.value = false
+  }
+}
+
 async function openFolder(row: any) {
+  if (selectMode.value) {
+    toggleSelect(row)
+    return
+  }
   const isDir = isRowDir(row)
   if (!isDir) {
     await preview(row)
@@ -255,7 +283,7 @@ async function openFolder(row: any) {
       crumbs.value = target.split('/').filter(Boolean)
       inSearchMode.value = false
     } else {
-      ElMessage.error(`code=${res.error?.code}`)
+      toast(`code=${res.error?.code}`, 'error')
     }
   } finally {
     loading.value = false
@@ -268,57 +296,52 @@ async function crumbJump(idx: number) {
 }
 
 async function doCreateFolder() {
-  if (!path.value) return ElMessage.warning('请先进入共享文件夹')
-  try {
-    const { value } = await ElMessageBox.prompt('新建文件夹名', '新建', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      inputPattern: /^[^/\\:*?"<>|]{1,200}$/,
-      inputErrorMessage: '名称不合法',
-    })
-    const res = await dsm.createFolder(path.value, value!)
-    if (res.success) {
-      ElMessage.success('已创建')
-      await loadCurrent()
-    } else {
-      ElMessage.error(`创建失败 code=${res.error?.code}`)
-    }
-  } catch {}
+  if (!path.value) {
+    toast('请先进入共享文件夹', 'warning')
+    return
+  }
+  const value = await prompt('新建文件夹名', '新建', {
+    pattern: /^[^/\\:*?"<>|]{1,200}$/,
+    patternError: '名称不合法',
+  })
+  if (!value) return
+  const res = await dsm.createFolder(path.value, value)
+  if (res.success) {
+    toast('已创建', 'success')
+    await loadCurrent()
+  } else {
+    toast(`创建失败 code=${res.error?.code}`, 'error')
+  }
 }
 
 async function doRename(row: any) {
-  try {
-    const { value } = await ElMessageBox.prompt('重命名', row.name, {
-      inputValue: row.name,
-      inputPattern: /^[^/\\:*?"<>|]{1,200}$/,
-      inputErrorMessage: '名称不合法',
-    })
-    const res = await dsm.rename(row.path, value!)
-    if (res.success) {
-      ElMessage.success('已重命名')
-      await loadCurrent()
-    } else {
-      ElMessage.error(`重命名失败 code=${res.error?.code}`)
-    }
-  } catch {}
+  const value = await prompt('重命名', row.name, {
+    defaultValue: row.name,
+    pattern: /^[^/\\:*?"<>|]{1,200}$/,
+    patternError: '名称不合法',
+  })
+  if (!value) return
+  const res = await dsm.rename(row.path, value)
+  if (res.success) {
+    toast('已重命名', 'success')
+    await loadCurrent()
+  } else {
+    toast(`重命名失败 code=${res.error?.code}`, 'error')
+  }
 }
 
 async function doDelete(row: any) {
+  const ok = await confirm(`确定删除「${row.name}」？该操作不可撤销。`, '删除', { danger: true, confirmText: '删除' })
+  if (!ok) return
+  loading.value = true
   try {
-    await ElMessageBox.confirm(`确定删除「${row.name}」？该操作不可撤销。`, '删除', {
-      type: 'warning',
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
-    })
-    loading.value = true
     const res = await dsm.deletePath(row.path)
     if (res.success) {
-      ElMessage.success('已删除')
+      toast('已删除', 'success')
       await loadCurrent()
     } else {
-      ElMessage.error(`删除失败 code=${res.error?.code}`)
+      toast(`删除失败 code=${res.error?.code}`, 'error')
     }
-  } catch {
   } finally {
     loading.value = false
   }
@@ -326,7 +349,7 @@ async function doDelete(row: any) {
 
 function doDownload(row: any) {
   enqueue(row.path, row.name, Number(row.additional?.size || 0))
-  ElMessage.success(`已添加「${row.name}」到下载队列`)
+  toast(`已添加「${row.name}」到下载队列`, 'success')
 }
 
 function triggerUpload() {
@@ -342,8 +365,8 @@ async function onUploadPicked(ev: Event) {
   try {
     for (const f of Array.from(files)) {
       const res = await dsm.upload(path.value, f)
-      if (res.success) ElMessage.success(`${f.name} 上传完成`)
-      else ElMessage.error(`${f.name} 上传失败 code=${res.error?.code}`)
+      if (res.success) toast(`${f.name} 上传完成`, 'success')
+      else toast(`${f.name} 上传失败 code=${res.error?.code}`, 'error')
     }
     await loadCurrent()
   } finally {
@@ -359,7 +382,7 @@ async function doSearch() {
   try {
     const start = await dsm.searchStart(folder, searchPattern.value, true)
     if (!start.success || !start.data?.taskid) {
-      ElMessage.error('启动搜索失败')
+      toast('启动搜索失败', 'error')
       return
     }
     searchTaskId.value = start.data.taskid
@@ -379,7 +402,7 @@ async function doSearch() {
     }
     items.value = results
     await dsm.searchStop(searchTaskId.value).catch(() => {})
-    ElMessage.success(`找到 ${results.length} 个结果`)
+    toast(`找到 ${results.length} 个结果`, 'success')
   } finally {
     loading.value = false
   }
@@ -407,39 +430,49 @@ async function preview(row: any) {
   previewSrc.value = ''
   previewText.value = ''
   if (previewType.value === 'other') {
-    ElMessage.info('该类型暂不支持预览，可改为下载')
+    toast('该类型暂不支持预览，可改为下载', 'info')
     return
   }
-  // 视频/音频优先用 dsm:// 流式播放，避免整文件载入内存
   if (previewType.value === 'video' || previewType.value === 'audio') {
     previewSrc.value = dsm.mediaUrl('stream', row.path)
     previewOpen.value = true
     return
   }
-  // 大文件保护：文本 > 5MB、图片 > 20MB 时提示
   const fileSize = Number(row.additional?.size ?? 0)
   const TEXT_LIMIT = 5 * 1024 * 1024
   const IMAGE_LIMIT = 20 * 1024 * 1024
   const limit = previewType.value === 'text' ? TEXT_LIMIT : IMAGE_LIMIT
   if (fileSize > limit) {
-    ElMessage.warning(`文件过大（${formatBytes(fileSize)}），请直接下载查看`)
+    toast(`文件过大（${formatBytes(fileSize)}），请直接下载查看`, 'warning')
     return
   }
-  previewOpen.value = true
   previewLoading.value = true
   try {
     const buf = await dsm.downloadBytes(row.path)
     if (previewType.value === 'text') {
       const decoder = new TextDecoder('utf-8', { fatal: false })
       previewText.value = decoder.decode(buf)
+      previewOpen.value = true
     } else {
-      // image
       const blob = new Blob([buf], { type: 'image/*' })
       previewSrc.value = URL.createObjectURL(blob)
+      if (isMobile.value) {
+        // 用 Vant ImagePreview 支持双指缩放、横滑
+        showImagePreview({
+          images: [previewSrc.value],
+          showIndex: false,
+          closeable: true,
+          onClose: () => {
+            if (previewSrc.value.startsWith('blob:')) URL.revokeObjectURL(previewSrc.value)
+            previewSrc.value = ''
+          },
+        })
+      } else {
+        previewOpen.value = true
+      }
     }
   } catch (e: any) {
-    ElMessage.error('预览失败：' + (e?.message ?? e))
-    previewOpen.value = false
+    toast('预览失败：' + (e?.message ?? e), 'error')
   } finally {
     previewLoading.value = false
   }
@@ -485,7 +518,6 @@ async function loadThumbs(rows: any[], gen: number) {
       try {
         const buf = await dsm.thumbBytes(p, 'small')
         if (gen !== thumbGen) return
-        // 大小太小通常是 DSM 返回的 JSON 错误，跳过
         if (!buf || buf.byteLength < 64) continue
         const blob = new Blob([buf], { type: 'image/jpeg' })
         thumbs.value[p] = URL.createObjectURL(blob)
@@ -505,21 +537,77 @@ onUnmounted(() => {
   revokeThumbs()
 })
 
-function sortByName(a: any, b: any) {
-  return (a.name ?? '').localeCompare(b.name ?? '', 'zh-CN')
+function sortByName(a: any, b: any) { return (a.name ?? '').localeCompare(b.name ?? '', 'zh-CN') }
+function sortBySize(a: any, b: any) { return (Number(a.additional?.size) || 0) - (Number(b.additional?.size) || 0) }
+function sortByTime(a: any, b: any) { return (Number(a.additional?.time?.mtime) || 0) - (Number(b.additional?.time?.mtime) || 0) }
+
+// 移动端紧凑日期：今天 → HH:mm；本年 → MM/DD；其它 → YY/MM/DD
+function shortDate(epoch: number): string {
+  const d = new Date(epoch * 1000)
+  const now = new Date()
+  const sameDay = d.toDateString() === now.toDateString()
+  if (sameDay) return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0')
+  const sameYear = d.getFullYear() === now.getFullYear()
+  const mm = (d.getMonth() + 1).toString().padStart(2, '0')
+  const dd = d.getDate().toString().padStart(2, '0')
+  if (sameYear) return `${mm}/${dd}`
+  return `${String(d.getFullYear()).slice(2)}/${mm}/${dd}`
 }
 
-function sortBySize(a: any, b: any) {
-  return (Number(a.additional?.size) || 0) - (Number(b.additional?.size) || 0)
+// ========== 移动端 ActionSheet（声明式） ==========
+const sheetOpen = ref(false)
+const sheetActions = ref<ActionSheetAction[]>([])
+function openSheet(actions: ActionSheetAction[]) {
+  sheetActions.value = actions
+  sheetOpen.value = true
+}
+function onSheetSelect(action: ActionSheetAction) {
+  sheetOpen.value = false
+  ;(action as any).callback?.()
 }
 
-function sortByTime(a: any, b: any) {
-  return (Number(a.additional?.time?.mtime) || 0) - (Number(b.additional?.time?.mtime) || 0)
+function openRowActions(row: any) {
+  const actions: ActionSheetAction[] = []
+  if (!isRowDir(row)) {
+    actions.push({ name: '预览', callback: () => preview(row) } as any)
+    actions.push({ name: '下载', callback: () => doDownload(row) } as any)
+  }
+  actions.push({ name: '复制到…', callback: () => startCopyMove('copy', [row.path]) } as any)
+  actions.push({ name: '移动到…', callback: () => startCopyMove('move', [row.path]) } as any)
+  actions.push({ name: '重命名', callback: () => doRename(row) } as any)
+  actions.push({ name: '删除', color: '#EF4444', callback: () => doDelete(row) } as any)
+  openSheet(actions)
+}
+
+function openSortSheet() {
+  openSheet([
+    { name: '按名称' + (sortKey.value === 'name' ? (sortOrder.value === 'ascending' ? ' ↑' : ' ↓') : ''), callback: () => { sortKey.value = 'name'; sortOrder.value = 'ascending' } } as any,
+    { name: '按大小' + (sortKey.value === 'size' ? (sortOrder.value === 'ascending' ? ' ↑' : ' ↓') : ''), callback: () => { sortKey.value = 'size'; sortOrder.value = 'descending' } } as any,
+    { name: '按修改时间' + (sortKey.value === 'time' ? (sortOrder.value === 'ascending' ? ' ↑' : ' ↓') : ''), callback: () => { sortKey.value = 'time'; sortOrder.value = 'descending' } } as any,
+    { name: '反转顺序', callback: () => { sortOrder.value = sortOrder.value === 'ascending' ? 'descending' : 'ascending' } } as any,
+  ])
+}
+
+function openMoreSheet() {
+  const actions: ActionSheetAction[] = []
+  if (path.value && !inSearchMode.value) {
+    actions.push({ name: '新建文件夹', callback: doCreateFolder } as any)
+  }
+  if (path.value) {
+    actions.push({ name: isFavorite(path.value) ? '取消收藏' : '收藏当前目录', callback: () => toggleFavorite(path.value) } as any)
+  }
+  actions.push({ name: '多选模式', callback: () => { selectMode.value = true } } as any)
+  actions.push({ name: '排序', callback: openSortSheet } as any)
+  if (inSearchMode.value) {
+    actions.push({ name: '退出搜索', callback: exitSearch } as any)
+  }
+  openSheet(actions)
 }
 </script>
 
 <template>
-  <el-container class="page">
+  <!-- ========== 桌面端 ========== -->
+  <el-container v-if="!isMobile" class="page">
     <el-header>
       <div class="header">
         <h2 class="page-title">文件</h2>
@@ -545,7 +633,6 @@ function sortByTime(a: any, b: any) {
       </div>
     </el-header>
 
-    <!-- 收藏栏 -->
     <div class="favorites-bar" v-if="favorites.length">
       <el-icon :size="14"><Star /></el-icon>
       <el-tag
@@ -566,13 +653,11 @@ function sortByTime(a: any, b: any) {
       @drop="onDrop"
       :class="{ 'drag-over': dragging }"
     >
-      <!-- 拖拽上传提示 -->
       <div v-if="dragging" class="drop-overlay">
         <el-icon :size="48"><Upload /></el-icon>
         <span>松开以上传文件</span>
       </div>
 
-      <!-- 批量操作栏 -->
       <div v-if="selection.length" class="batch-bar">
         <span>已选 {{ selection.length }} 项</span>
         <el-button size="small" @click="batchDownload">批量下载</el-button>
@@ -640,9 +725,159 @@ function sortByTime(a: any, b: any) {
       @confirm="onCopyMoveConfirm"
     />
   </el-container>
+
+  <!-- ========== 移动端 ========== -->
+  <div v-else class="m-files">
+    <!-- 顶部：面包屑（横滑、首尾渐变） + 搜索 -->
+    <div class="m-files-head">
+      <div class="m-crumbs-wrap">
+        <div class="m-crumbs">
+          <span class="m-crumb-item" @click="loadShares">
+            <van-icon name="wap-home-o" size="14" />
+            共享
+          </span>
+          <template v-for="(c, i) in crumbs" :key="i + c">
+            <span class="m-crumb-sep">/</span>
+            <span class="m-crumb-item" :class="{ active: i === crumbs.length - 1 }" @click="crumbJump(i)">{{ c }}</span>
+          </template>
+        </div>
+      </div>
+      <van-search
+        v-model="searchPattern"
+        placeholder="搜索当前目录"
+        shape="round"
+        @search="doSearch"
+      >
+        <template #right-icon>
+          <van-icon v-if="inSearchMode" name="cross" @click="exitSearch" />
+        </template>
+      </van-search>
+      <div v-if="favorites.length" class="m-favs">
+        <van-tag
+          v-for="f in favorites"
+          :key="f"
+          type="primary"
+          plain
+          closeable
+          @click="openFolder({ path: f, isdir: true })"
+          @close="toggleFavorite(f)"
+          class="m-fav-tag"
+        >{{ f.split('/').pop() || f }}</van-tag>
+      </div>
+    </div>
+
+    <!-- 多选工具栏 -->
+    <div v-if="selectMode" class="m-batch-bar">
+      <div class="m-batch-info">已选 {{ selectedPaths.size }} 项</div>
+      <van-button size="mini" @click="batchDownload">下载</van-button>
+      <van-button size="mini" @click="batchCopy">复制</van-button>
+      <van-button size="mini" @click="batchMove">移动</van-button>
+      <van-button size="mini" type="danger" @click="batchDelete">删除</van-button>
+      <van-button size="mini" plain @click="exitSelectMode">完成</van-button>
+    </div>
+
+    <van-pull-refresh v-model="refreshing" @refresh="onPullRefresh">
+      <van-empty v-if="!loading && !sortedItems.length" description="目录为空" />
+      <div v-else class="m-list">
+        <div
+          v-for="row in sortedItems"
+          :key="row.path"
+          class="m-row"
+          :class="{ 'm-row-selected': selectedPaths.has(row.path) }"
+          @click="openFolder(row)"
+        >
+          <!-- 左：图标 / 缩略图 / 选择框 -->
+          <div class="m-row-left">
+            <van-checkbox
+              v-if="selectMode"
+              :model-value="selectedPaths.has(row.path)"
+              shape="square"
+              @click.stop
+              @update:model-value="toggleSelect(row)"
+            />
+            <img
+              v-else-if="isThumbable(row) && thumbs[row.path]"
+              :src="thumbs[row.path]"
+              class="m-row-thumb"
+            />
+            <FileTypeIcon
+              v-else
+              :name="row.name"
+              :is-dir="isRowDir(row)"
+              :size="40"
+            />
+          </div>
+
+          <!-- 中：文件名 + meta -->
+          <div class="m-row-mid">
+            <div class="m-row-name">{{ row.name }}</div>
+            <div class="m-row-meta">
+              <span v-if="!isRowDir(row)" class="m-row-size">{{ formatBytes(row.additional?.size) }}</span>
+              <span v-else class="m-row-size">文件夹</span>
+              <span v-if="row.additional?.time?.mtime" class="m-row-dot">·</span>
+              <span v-if="row.additional?.time?.mtime" class="m-row-date">{{ shortDate(row.additional.time.mtime) }}</span>
+            </div>
+          </div>
+
+          <!-- 右：操作 / 进入 -->
+          <button
+            v-if="!selectMode"
+            class="m-row-action"
+            @click.stop="openRowActions(row)"
+            aria-label="更多操作"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <circle cx="5" cy="12" r="1.6" />
+              <circle cx="12" cy="12" r="1.6" />
+              <circle cx="19" cy="12" r="1.6" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </van-pull-refresh>
+
+    <!-- 文件上传隐藏 input -->
+    <input ref="uploadInput" type="file" multiple style="display:none" @change="onUploadPicked" />
+
+    <!-- 浮动操作按钮 (FAB) -->
+    <div v-if="!selectMode" class="m-fab-group">
+      <van-button v-if="canUpload" round type="primary" icon="upgrade" class="m-fab" @click="triggerUpload" />
+      <van-button round icon="ellipsis" class="m-fab m-fab-more" @click="openMoreSheet" />
+    </div>
+
+    <!-- 视频/音频/文本预览 popup（图片走 ImagePreview） -->
+    <van-popup
+      v-model:show="previewOpen"
+      position="bottom"
+      :style="{ height: '100%' }"
+    >
+      <van-nav-bar :title="previewTitle" left-arrow @click-left="previewOpen = false" />
+      <div class="m-preview-body">
+        <video v-if="previewType === 'video' && previewSrc" :src="previewSrc" class="m-preview-media" controls autoplay playsinline />
+        <audio v-else-if="previewType === 'audio' && previewSrc" :src="previewSrc" controls style="width:100%" />
+        <pre v-else-if="previewType === 'text'" class="m-preview-text">{{ previewText }}</pre>
+      </div>
+    </van-popup>
+
+    <van-action-sheet
+      v-model:show="sheetOpen"
+      :actions="sheetActions"
+      cancel-text="取消"
+      close-on-click-action
+      @select="onSheetSelect"
+    />
+
+    <FolderPicker
+      v-model="copyMovePickerOpen"
+      :initial="path"
+      :title="copyMoveMode === 'copy' ? '复制到…' : '移动到…'"
+      @confirm="onCopyMoveConfirm"
+    />
+  </div>
 </template>
 
 <style scoped>
+/* ========== Desktop ========== */
 .page { height: 100%; display: flex; flex-direction: column; }
 .header {
   display: flex; align-items: center; padding: 10px 16px; gap: 8px;
@@ -665,34 +900,20 @@ a { cursor: pointer; color: var(--sl-primary); }
 }
 .thumb-ph { color: #c0c4cc; }
 
-/* Table overrides */
 :deep(.el-table) {
-  border-radius: var(--sl-radius-sm);
-  overflow: hidden;
+  border-radius: var(--sl-radius-sm); overflow: hidden;
   --el-table-border-color: var(--el-border-color-lighter);
 }
 :deep(.el-table th.el-table__cell) {
-  background: var(--el-fill-color);
-  font-weight: 600;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  background: var(--el-fill-color); font-weight: 600; font-size: 12px;
+  text-transform: uppercase; letter-spacing: 0.03em;
 }
-:deep(.el-table tr) {
-  transition: background var(--sl-transition-fast);
-}
+:deep(.el-table tr) { transition: background var(--sl-transition-fast); }
 :deep(.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell) {
   background: rgba(0, 0, 0, 0.015);
 }
-:deep(.el-main) {
-  padding: 12px 16px;
-  position: relative;
-}
-.drag-over {
-  outline: 2px dashed var(--sl-primary);
-  outline-offset: -4px;
-  background: rgba(99, 102, 241, 0.04);
-}
+:deep(.el-main) { padding: 12px 16px; position: relative; }
+.drag-over { outline: 2px dashed var(--sl-primary); outline-offset: -4px; background: rgba(99, 102, 241, 0.04); }
 .drop-overlay {
   position: absolute; inset: 0; z-index: 100;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
@@ -711,4 +932,185 @@ a { cursor: pointer; color: var(--sl-primary); }
   font-size: 12px; color: var(--el-text-color-secondary);
 }
 .fav-tag { cursor: pointer; }
+
+/* ========== Mobile ========== */
+.m-files {
+  min-height: 100%;
+  padding-bottom: 100px;
+  /* 关键：限制宽度，防溢出 */
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+.m-files-head {
+  background: var(--sl-bg-card);
+  border-bottom: var(--sl-border);
+  position: sticky;
+  top: 0;
+  z-index: 8;
+}
+
+/* 面包屑：横向滚动 + 两端渐变蒙板 */
+.m-crumbs-wrap {
+  position: relative;
+  padding: 10px 0;
+}
+.m-crumbs-wrap::before,
+.m-crumbs-wrap::after {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 16px;
+  pointer-events: none;
+  z-index: 1;
+}
+.m-crumbs-wrap::before {
+  left: 0;
+  background: linear-gradient(to right, var(--sl-bg-card), transparent);
+}
+.m-crumbs-wrap::after {
+  right: 0;
+  background: linear-gradient(to left, var(--sl-bg-card), transparent);
+}
+.m-crumbs {
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 16px;
+  font-size: 14px;
+  overflow-x: auto;
+  white-space: nowrap;
+  color: var(--el-text-color-regular);
+  scrollbar-width: none;
+}
+.m-crumbs::-webkit-scrollbar { display: none; }
+.m-crumb-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.m-crumb-item.active { color: var(--sl-primary); font-weight: 600; }
+.m-crumb-sep { color: var(--el-text-color-placeholder); flex-shrink: 0; }
+
+.m-favs {
+  display: flex; align-items: center; padding: 0 16px 10px;
+  gap: 6px;
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+.m-favs::-webkit-scrollbar { display: none; }
+.m-fav-tag { flex-shrink: 0; }
+
+.m-batch-bar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 10px 12px;
+  background: var(--el-color-primary-light-9);
+  position: sticky; top: 0; z-index: 9;
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+.m-batch-info { flex: 1; min-width: 0; }
+
+/* iOS Files / DS file 风格的文件行 */
+.m-list {
+  background: var(--sl-bg-card);
+  border-radius: 12px;
+  margin: 8px 12px;
+  overflow: hidden;
+}
+.m-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px 10px 14px;
+  background: var(--sl-bg-card);
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  cursor: pointer;
+  transition: background var(--sl-transition-fast);
+  min-width: 0;
+}
+.m-row:last-child { border-bottom: none; }
+.m-row:active { background: var(--el-fill-color-light); }
+.m-row-selected { background: rgba(99, 102, 241, 0.08); }
+
+.m-row-left {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.m-row-thumb {
+  width: 40px; height: 40px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--el-fill-color);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.m-row-mid {
+  flex: 1;
+  min-width: 0;          /* 关键：允许 flex 子元素收缩到 0，否则会撑破 */
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.m-row-name {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--el-text-color-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+.m-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.3;
+}
+.m-row-size, .m-row-date { flex-shrink: 0; }
+.m-row-dot { color: var(--el-text-color-placeholder); }
+
+.m-row-action {
+  flex-shrink: 0;
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 18px;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.m-row-action:active { background: var(--el-fill-color); }
+
+.m-fab-group {
+  position: fixed; right: 16px;
+  bottom: calc(56px + var(--sl-safe-bottom) + 16px);
+  display: flex; flex-direction: column; gap: 10px; z-index: 99;
+}
+.m-fab {
+  width: 48px; height: 48px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+.m-fab-more { background: var(--sl-bg-card); }
+
+.m-preview-body {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  background: #000; height: calc(100% - 46px); overflow: auto;
+}
+.m-preview-media { max-width: 100%; max-height: 100%; }
+.m-preview-text {
+  width: 100%; height: 100%; overflow: auto; padding: 16px;
+  background: var(--sl-bg-card); color: var(--el-text-color-primary);
+  white-space: pre-wrap; word-break: break-all;
+  font-family: 'SF Mono', Consolas, Monaco, monospace; font-size: 13px; box-sizing: border-box;
+}
 </style>

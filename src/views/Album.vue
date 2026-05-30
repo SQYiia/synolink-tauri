@@ -1,12 +1,17 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { showImagePreview } from 'vant'
 import { dsm } from '../api/dsm'
 import { formatBytes } from '../utils/format'
 import { useMediaScan } from '../composables/useMediaScan'
 import { enqueue as enqueueDownload } from '../composables/useDownloadQueue'
 import FolderPicker from '../components/FolderPicker.vue'
 import LazyThumb from '../components/LazyThumb.vue'
+import { useIsMobile } from '../composables/useIsMobile'
+import { confirm, toast } from '../utils/feedback'
+
+const isMobile = useIsMobile()
 
 const IMG_EXT = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic'])
 
@@ -26,7 +31,6 @@ const {
   visibleInit: 120,
   visibleStep: 120,
   storageKeyPrefix: 'album:folder',
-  // 服务端按创建时间倒序返回，避免前端对万级数据重复 O(n log n) 排序。
   sortBy: 'crtime',
   sortDirection: 'desc',
 })
@@ -35,7 +39,6 @@ const viewerOpen = ref(false)
 const viewerIndex = ref(0)
 const pickerOpen = ref(false)
 
-// ─── Virtual Scroll State ──────────────────────────────────
 const scrollEl = ref<HTMLElement | null>(null)
 const containerWidth = ref(0)
 const scrollTop = ref(0)
@@ -46,23 +49,22 @@ let rafId: number | null = null
 let resizeObserver: ResizeObserver | null = null
 
 const GAP = 4
-const MIN_COL_WIDTH = 140
 const HEADER_HEIGHT = 32
 const BUFFER = 1000
 
+// 移动端用更小的格子
+const MIN_COL_WIDTH = computed(() => isMobile.value ? 110 : 140)
+
 const colCount = computed(() => {
   if (containerWidth.value <= 0) return 1
-  return Math.max(1, Math.floor((containerWidth.value + GAP) / (MIN_COL_WIDTH + GAP)))
+  return Math.max(isMobile.value ? 3 : 1, Math.floor((containerWidth.value + GAP) / (MIN_COL_WIDTH.value + GAP)))
 })
 
 const cellSize = computed(() => {
-  if (containerWidth.value <= 0) return MIN_COL_WIDTH
+  if (containerWidth.value <= 0) return MIN_COL_WIDTH.value
   return (containerWidth.value - (colCount.value - 1) * GAP) / colCount.value
 })
 
-// ─── Date helpers ──────────────────────────────────────────
-// 使用 WeakMap 缓存每张照片的时间/日期标签/缩略图 URL，避免在排序与分组中
-// 反复执行正则解析与字符串拼接（大量文件场景下是主要 CPU 热点）。
 const timeCache = new WeakMap<object, number>()
 const dateCache = new WeakMap<object, string>()
 const thumbCache = new WeakMap<object, string>()
@@ -86,8 +88,6 @@ function parseNameTime(name: string): number {
 function photoTime(p: any): number {
   const cached = timeCache.get(p)
   if (cached !== undefined) return cached
-  // 与服务端排序字段（crtime desc）保持一致，避免分组日期与列表顺序错位：
-  // 先 crtime → 次 mtime → 最后才用文件名解析作为兜底。
   let t = Number(p?.additional?.time?.crtime ?? 0)
   if (!t) t = Number(p?.additional?.time?.mtime ?? 0)
   if (!t) t = parseNameTime(p?.name || '')
@@ -109,20 +109,13 @@ function dateLabel(p: any): string {
   return label
 }
 
-// 服务端已按 crtime desc 返回，前端不再排序，仅为后续分组使用。
-// 该 computed 代价接近零（仅复制数组引用），其他上下文依赖 flatPhotos 的逗号不变。
 const flatPhotos = computed(() => photos.value)
 
-// ─── Layout segments ──────────────────────────────────────
 type Segment =
   | { type: 'header'; key: string; date: string; count: number; offset: number; height: number }
   | { type: 'row'; key: string; photos: any[]; offset: number; height: number }
 
 const segments = computed<Segment[]>(() => {
-  // 扫描进行中不构建 segments：限频刷新的 photos 会令本 computed 反复
-  // 重算（万级数据下每次 50ms+），且行 segment 的 key 会随 photos 插入变化，
-  // 导致 LazyThumb 被销毁重建、缩略图重复请求与主线程持续卡顿。
-  // 扫描完成后一次性构建即可。
   if (loading.value) return []
 
   const cols = colCount.value
@@ -184,7 +177,6 @@ const visibleSegments = computed(() => {
   )
 })
 
-// 仅提取 header 子集，以在 floatingDate 中二分查找，避免每次滚动都遍历全量 segments。
 const headerSegs = computed(() =>
   segments.value.filter((s): s is Extract<Segment, { type: 'header' }> => s.type === 'header'),
 )
@@ -193,7 +185,6 @@ const floatingDate = computed(() => {
   const target = scrollTop.value + 60
   const hs = headerSegs.value
   if (!hs.length) return ''
-  // 二分查找：找到最大的 offset <= target 的 header
   let lo = 0, hi = hs.length - 1, idx = -1
   while (lo <= hi) {
     const mid = (lo + hi) >> 1
@@ -207,7 +198,6 @@ const floatingDate = computed(() => {
   return idx >= 0 ? hs[idx].date : ''
 })
 
-// ─── Scroll handling ──────────────────────────────────────
 function onScroll() {
   if (rafId !== null) return
   rafId = requestAnimationFrame(() => {
@@ -223,7 +213,6 @@ function onScroll() {
   })
 }
 
-// ─── Lifecycle ──────────────────────────────────────────
 onMounted(() => {
   const hasFolder = initFromStorage()
   if (hasFolder) scan()
@@ -243,7 +232,6 @@ onMounted(() => {
 
 watch(() => dsm.baseUrl, () => { onBaseUrlChange() })
 
-// ─── Thumbnail / viewer ──────────────────────────────────
 function thumbOf(p: any) {
   const cached = thumbCache.get(p)
   if (cached) return cached
@@ -258,7 +246,17 @@ function onFullError(p: any) { p._fullFailed = true }
 
 function openPhoto(p: any) {
   const idx = flatPhotos.value.findIndex((x) => x.path === p.path)
-  if (idx >= 0) {
+  if (idx < 0) return
+  if (isMobile.value) {
+    // 移动端用 van-image-preview（双指缩放 + 横滑切换）
+    const images = flatPhotos.value.map((x: any) => fullOf(x))
+    showImagePreview({
+      images,
+      startPosition: idx,
+      closeable: true,
+      showIndex: true,
+    })
+  } else {
     viewerIndex.value = idx
     viewerOpen.value = true
   }
@@ -321,11 +319,41 @@ onBeforeUnmount(() => {
   if (rafId !== null) cancelAnimationFrame(rafId)
   if (floatingDateTimer) clearTimeout(floatingDateTimer)
 })
+
+// 移动端：选择目录后自动开扫
+async function onMobilePickFolder(p: string) {
+  onPickFolder(p)
+  await scan()
+}
+
+// 移动端长按删除单张
+async function onMobileLongPress(p: any) {
+  const ok = await confirm(`确定删除「${p.name}」？`, '删除', { danger: true, confirmText: '删除' })
+  if (!ok) return
+  const res = await dsm.deletePath(p.path)
+  if (res.success) {
+    toast('已删除', 'success')
+    photos.value = photos.value.filter((x: any) => x.path !== p.path)
+  } else {
+    toast(`删除失败 code=${res.error?.code}`, 'error')
+  }
+}
+let longPressTimer: ReturnType<typeof setTimeout> | null = null
+function onTouchStart(p: any) {
+  if (!isMobile.value) return
+  longPressTimer = setTimeout(() => {
+    onMobileLongPress(p)
+    longPressTimer = null
+  }, 600)
+}
+function onTouchEnd() {
+  if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null }
+}
 </script>
 
 <template>
-  <div class="page">
-    <!-- 顶栏 -->
+  <!-- 桌面端 -->
+  <div v-if="!isMobile" class="page">
     <header class="topbar">
       <h2 class="title">相册</h2>
       <div class="actions">
@@ -342,7 +370,6 @@ onBeforeUnmount(() => {
       <span class="count">共 {{ photos.length }} 张</span>
     </div>
 
-    <!-- 主体：虚拟滚动容器 -->
     <main ref="scrollEl" class="body" @scroll="onScroll" v-loading="loading">
       <div v-if="!folder" class="empty">
         <el-icon :size="64" color="#c0c4cc"><Picture /></el-icon>
@@ -355,23 +382,19 @@ onBeforeUnmount(() => {
       </div>
 
       <template v-else>
-        <!-- 扫描进行中只显示进度，不渲染网格，避免指数级 DOM patch 阻塞主线程 -->
         <div v-if="loading" class="scan-progress">
           <el-icon class="is-loading" :size="32"><Loading /></el-icon>
           <div style="margin-top:12px">扫描中，已发现 {{ photos.length }} 张照片…</div>
           <div class="hint">扫描完成后会一次性渲染网格</div>
         </div>
 
-        <!-- 浮动日期指示器 -->
         <div
           v-if="!loading && floatingDate && floatingDateVisible && flatPhotos.length > 0"
           class="floating-date"
         >{{ floatingDate }}</div>
 
-        <!-- 虚拟高度占位 -->
         <div class="virtual-spacer" :style="{ height: totalHeight + 'px' }">
           <template v-for="seg in visibleSegments" :key="seg.key">
-            <!-- 日期头 -->
             <div
               v-if="seg.type === 'header'"
               class="date-title"
@@ -381,7 +404,6 @@ onBeforeUnmount(() => {
               <span>{{ (seg as any).date }}</span>
               <span class="date-count">{{ (seg as any).count }}</span>
             </div>
-            <!-- 照片行 -->
             <div
               v-else
               class="virtual-row"
@@ -405,14 +427,12 @@ onBeforeUnmount(() => {
           </template>
         </div>
 
-        <!-- 底部统计 -->
         <div class="bottom-stat" v-if="flatPhotos.length > 0">
           共 {{ flatPhotos.length }} 张照片
         </div>
       </template>
     </main>
 
-    <!-- 查看器 -->
     <el-dialog
       v-model="viewerOpen"
       :title="flatPhotos[viewerIndex]?.name"
@@ -466,111 +486,128 @@ onBeforeUnmount(() => {
 
     <FolderPicker v-model="pickerOpen" :initial="folder" title="选择相册目录" @confirm="onPickFolder" />
   </div>
+
+  <!-- 移动端 -->
+  <div v-else class="m-album">
+    <div class="m-album-head">
+      <div class="m-album-folder" @click="pickerOpen = true">
+        <van-icon name="folder-o" size="18" />
+        <span class="m-album-folder-text">{{ folder || '选择相册目录' }}</span>
+        <van-icon name="arrow-down" size="14" />
+      </div>
+      <span v-if="folder && photos.length" class="m-album-count">{{ photos.length }} 张</span>
+    </div>
+
+    <main ref="scrollEl" class="m-album-body" @scroll="onScroll">
+      <van-empty v-if="!folder" image="search" description="请选择要浏览的图片目录">
+        <van-button round type="primary" @click="pickerOpen = true">选择目录</van-button>
+      </van-empty>
+      <van-empty v-else-if="!photos.length && !loading" image="default" description="此目录暂无图片" />
+
+      <template v-else>
+        <div v-if="loading" class="m-scan-progress">
+          <van-loading size="24" />
+          <div style="margin-top:8px">已发现 {{ photos.length }} 张照片…</div>
+        </div>
+
+        <div
+          v-if="!loading && floatingDate && floatingDateVisible && flatPhotos.length > 0"
+          class="floating-date"
+        >{{ floatingDate }}</div>
+
+        <div class="virtual-spacer" :style="{ height: totalHeight + 'px' }">
+          <template v-for="seg in visibleSegments" :key="seg.key">
+            <div
+              v-if="seg.type === 'header'"
+              class="m-date-title"
+              :style="{ position: 'absolute', top: seg.offset + 'px', width: '100%' }"
+            >
+              <span>{{ (seg as any).date }}</span>
+              <span class="m-date-count">{{ (seg as any).count }}</span>
+            </div>
+            <div
+              v-else
+              class="virtual-row"
+              :style="{ position: 'absolute', top: seg.offset + 'px', width: '100%', height: cellSize + 'px' }"
+            >
+              <div
+                v-for="p in (seg as any).photos"
+                :key="p.path"
+                class="m-cell"
+                :style="{ width: cellSize + 'px', height: cellSize + 'px' }"
+                @click="openPhoto(p)"
+                @touchstart="onTouchStart(p)"
+                @touchend="onTouchEnd"
+                @touchcancel="onTouchEnd"
+                @touchmove="onTouchEnd"
+              >
+                <LazyThumb :src="thumbOf(p)" :alt="p.name" aspect-ratio="1/1">
+                  <template #fallback>
+                    <van-icon name="photo-o" size="28" color="#c0c4cc" />
+                  </template>
+                </LazyThumb>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <div class="m-bottom-stat" v-if="flatPhotos.length > 0">
+          共 {{ flatPhotos.length }} 张照片
+        </div>
+      </template>
+    </main>
+
+    <FolderPicker v-model="pickerOpen" :initial="folder" title="选择相册目录" @confirm="onMobilePickFolder" />
+  </div>
 </template>
 
 <style scoped>
+/* Desktop */
 .page {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  padding: 20px 24px 0;
-  max-width: 1400px;
-  margin: 0 auto;
+  display: flex; flex-direction: column; height: 100%;
+  padding: 20px 24px 0; max-width: 1400px; margin: 0 auto;
 }
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 0 16px;
-  border-bottom: var(--sl-border);
-  margin-bottom: 16px;
-  flex-shrink: 0;
+  border-bottom: var(--sl-border); margin-bottom: 16px; flex-shrink: 0;
 }
 .title { margin: 0; font-size: 16px; font-weight: 600; color: var(--el-text-color-primary); }
 .actions { display: flex; gap: 8px; }
 .folder-bar {
   display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--el-text-color-secondary);
   background: var(--sl-bg-card); border-radius: var(--sl-radius-sm); padding: 8px 12px; margin-bottom: 12px;
-  border: var(--sl-border);
-  flex-shrink: 0;
+  border: var(--sl-border); flex-shrink: 0;
 }
 .folder-path { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .count { color: var(--sl-primary); font-weight: 600; }
-
-.body {
-  flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  position: relative;
-  min-height: 0;
-}
-
+.body { flex: 1; overflow-y: auto; overflow-x: hidden; position: relative; min-height: 0; }
 .empty { text-align: center; padding: 48px 0; color: var(--el-text-color-secondary); font-size: 13px; }
-
-.scan-progress {
-  text-align: center;
-  padding: 64px 0;
-  color: var(--el-text-color-secondary);
-  font-size: 14px;
-}
-.scan-progress .hint {
-  margin-top: 6px;
-  font-size: 12px;
-  color: var(--el-text-color-placeholder);
-}
-
-/* 浮动日期指示器 */
+.scan-progress { text-align: center; padding: 64px 0; color: var(--el-text-color-secondary); font-size: 14px; }
+.scan-progress .hint { margin-top: 6px; font-size: 12px; color: var(--el-text-color-placeholder); }
 .floating-date {
-  position: sticky;
-  top: 8px;
-  z-index: 10;
-  display: inline-block;
-  background: rgba(0, 0, 0, 0.65);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 4px 14px;
-  border-radius: 20px;
-  pointer-events: none;
-  margin-left: 50%;
-  transform: translateX(-50%);
-  backdrop-filter: blur(8px);
-  transition: opacity 0.3s;
+  position: sticky; top: 8px; z-index: 10;
+  display: inline-block; background: rgba(0, 0, 0, 0.65); color: #fff;
+  font-size: 12px; font-weight: 600; padding: 4px 14px; border-radius: 20px;
+  pointer-events: none; margin-left: 50%; transform: translateX(-50%);
+  backdrop-filter: blur(8px); transition: opacity 0.3s;
 }
-
-/* 虚拟滚动容器 */
-.virtual-spacer {
-  position: relative;
-  width: 100%;
-}
-
+.virtual-spacer { position: relative; width: 100%; }
 .date-title {
-  display: flex; align-items: center; gap: 6px;
-  padding: 6px 0;
+  display: flex; align-items: center; gap: 6px; padding: 6px 0;
   font-size: 11px; font-weight: 600; color: var(--el-text-color-secondary);
-  text-transform: uppercase; letter-spacing: 0.05em;
-  box-sizing: border-box;
+  text-transform: uppercase; letter-spacing: 0.05em; box-sizing: border-box;
 }
-.date-count {
-  margin-left: 6px; font-size: 11px; color: var(--el-text-color-placeholder); font-weight: 400;
-}
-
-.virtual-row {
-  display: flex;
-  gap: 4px;
-}
-
+.date-count { margin-left: 6px; font-size: 11px; color: var(--el-text-color-placeholder); font-weight: 400; }
+.virtual-row { display: flex; gap: 4px; }
 .cell {
-  cursor: pointer; border-radius: var(--sl-radius-sm); overflow: hidden; background: var(--el-fill-color);
-  flex-shrink: 0;
+  cursor: pointer; border-radius: var(--sl-radius-sm); overflow: hidden;
+  background: var(--el-fill-color); flex-shrink: 0;
   transition: opacity var(--sl-transition-fast);
 }
 .cell:hover { opacity: 0.85; }
 .cell:active { opacity: 0.7; }
-
-.bottom-stat {
-  text-align: center; padding: 16px 0; font-size: 12px; color: var(--el-text-color-secondary);
-}
-
-/* Viewer */
+.bottom-stat { text-align: center; padding: 16px 0; font-size: 12px; color: var(--el-text-color-secondary); }
 .viewer { position: relative; display: flex; justify-content: center; align-items: center; min-height: 70vh; background: #000; border-radius: var(--sl-radius-sm); overflow: hidden; }
 .viewer-img { max-width: 100%; max-height: 80vh; object-fit: contain; }
 .viewer-img.placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 300px; height: 300px; background: #222; color: #ccc; }
@@ -582,7 +619,51 @@ onBeforeUnmount(() => {
 .viewer-info { text-align: center; color: var(--el-text-color-secondary); font-size: 12px; margin-top: 6px; display: flex; justify-content: center; gap: 16px; }
 .viewer-actions { display: flex; justify-content: center; gap: 12px; margin-top: 10px; }
 
-@media (max-width: 640px) {
-  .page { padding: 12px 12px 0; }
+/* Mobile */
+.m-album {
+  height: 100%;
+  display: flex; flex-direction: column;
+}
+.m-album-head {
+  display: flex; align-items: center;
+  padding: 10px 16px;
+  background: var(--sl-bg-card);
+  border-bottom: var(--sl-border);
+}
+.m-album-folder {
+  flex: 1; display: flex; align-items: center; gap: 6px;
+  font-size: 14px; color: var(--el-text-color-primary);
+  min-width: 0;
+}
+.m-album-folder-text {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 220px;
+}
+.m-album-count { font-size: 12px; color: var(--el-text-color-secondary); }
+.m-album-body {
+  flex: 1; overflow-y: auto; overflow-x: hidden;
+  position: relative; min-height: 0;
+  -webkit-overflow-scrolling: touch;
+}
+.m-scan-progress {
+  text-align: center; padding: 40px 0;
+  color: var(--el-text-color-secondary); font-size: 13px;
+}
+.m-date-title {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px; font-weight: 600; color: var(--el-text-color-secondary);
+  box-sizing: border-box;
+  background: var(--sl-bg-page);
+}
+.m-date-count { font-size: 11px; color: var(--el-text-color-placeholder); font-weight: 400; }
+.m-cell {
+  border-radius: 4px; overflow: hidden;
+  background: var(--el-fill-color); flex-shrink: 0;
+}
+.m-cell:active { opacity: 0.7; }
+.m-bottom-stat {
+  text-align: center; padding: 16px 0 80px;
+  font-size: 12px; color: var(--el-text-color-secondary);
 }
 </style>

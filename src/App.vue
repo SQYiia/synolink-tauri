@@ -185,4 +185,24 @@ html.dark ::-webkit-scrollbar-thumb:hover {
   outline-offset: 2px;
   border-radius: var(--sl-radius-sm);
 }
+
+/* ===== iOS / Mobile Adaptations ===== */
+:root {
+  --sl-safe-top: env(safe-area-inset-top, 0px);
+  --sl-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --sl-safe-left: env(safe-area-inset-left, 0px);
+  --sl-safe-right: env(safe-area-inset-right, 0px);
+}
+
+@media (max-width: 640px) {
+  html, body, #app {
+    font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+  }
+  /* 移动端默认隐藏滚动条（iOS 风格） */
+  ::-webkit-scrollbar { display: none; }
+  /* Vant Toast/Dialog 在 EP 之上 */
+  .van-toast, .van-dialog, .van-popup, .van-overlay { z-index: 3000; }
+}
 </style>

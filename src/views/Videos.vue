@@ -7,6 +7,9 @@ import { formatBytes } from '../utils/format'
 import { useMediaScan } from '../composables/useMediaScan'
 import FolderPicker from '../components/FolderPicker.vue'
 import LazyThumb from '../components/LazyThumb.vue'
+import { useIsMobile } from '../composables/useIsMobile'
+
+const isMobile = useIsMobile()
 
 const VIDEO_EXT = new Set(['mp4', 'webm', 'mov', 'mkv', 'avi', 'ts', 'm4v', 'mpg', 'mpeg', 'wmv', 'flv', '3gp'])
 
@@ -161,11 +164,16 @@ async function openExternal(v: any, e: Event) {
     ElMessage.error('打开外部播放器失败: ' + (err?.message ?? err))
   }
 }
+
+async function onMobilePickFolder(p: string) {
+  onPickFolder(p)
+  await scan()
+}
 </script>
 
 <template>
-  <div class="page">
-    <header class="topbar">
+  <div class="page" :class="{ 'm-page': isMobile }">
+    <header v-if="!isMobile" class="topbar">
       <h2 class="title">视频</h2>
       <div class="actions">
         <el-button @click="pickerOpen = true">
@@ -175,7 +183,17 @@ async function openExternal(v: any, e: Event) {
         <el-button type="primary" :loading="loading" :disabled="!folder" @click="scan">扫描</el-button>
       </div>
     </header>
-    <div class="folder-bar" v-if="folder">
+
+    <div v-if="isMobile" class="m-vids-head">
+      <div class="m-vids-folder" @click="pickerOpen = true">
+        <van-icon name="folder-o" size="18" />
+        <span class="m-vids-folder-text">{{ folder || '选择视频目录' }}</span>
+        <van-icon name="arrow-down" size="14" />
+      </div>
+      <span v-if="folder && videos.length" class="m-vids-count">{{ videos.length }} 个</span>
+    </div>
+
+    <div v-else-if="folder" class="folder-bar">
       <el-icon><Document /></el-icon>
       <span class="folder-path">{{ folder }}</span>
       <span class="count">共 {{ videos.length }} 个</span>
@@ -234,7 +252,9 @@ async function openExternal(v: any, e: Event) {
       </div>
     </main>
 
+    <!-- 桌面播放器 -->
     <el-dialog
+      v-if="!isMobile"
       v-model="playerOpen"
       :title="playingName"
       width="90%"
@@ -260,7 +280,37 @@ async function openExternal(v: any, e: Event) {
       </div>
     </el-dialog>
 
-    <FolderPicker v-model="pickerOpen" :initial="folder" title="选择视频目录" @confirm="onPickFolder" />
+    <!-- 移动端全屏播放器 -->
+    <van-popup
+      v-else
+      v-model:show="playerOpen"
+      position="bottom"
+      :style="{ height: '100%' }"
+    >
+      <van-nav-bar :title="playingName" left-arrow @click-left="playerOpen = false" />
+      <div class="m-player-box">
+        <video
+          v-if="playingSrc"
+          ref="videoEl"
+          :src="playingSrc"
+          class="m-player"
+          controls
+          autoplay
+          playsinline
+          preload="metadata"
+          @loadedmetadata="onVideoLoaded"
+          @timeupdate="onTimeUpdate"
+          @ended="onVideoEnded"
+        />
+      </div>
+    </van-popup>
+
+    <FolderPicker
+      v-model="pickerOpen"
+      :initial="folder"
+      title="选择视频目录"
+      @confirm="isMobile ? onMobilePickFolder($event) : onPickFolder($event)"
+    />
   </div>
 </template>
 
@@ -333,4 +383,38 @@ async function openExternal(v: any, e: Event) {
 .player-box { display: flex; justify-content: center; align-items: center; background: #000; border-radius: var(--sl-radius-sm); overflow: hidden; }
 .player { width: 100%; max-height: 75vh; background: #000; }
 .player-tip { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 10px; text-align: center; }
+
+/* Mobile */
+.m-page { padding: 0 !important; }
+.m-vids-head {
+  display: flex; align-items: center;
+  padding: 10px 16px;
+  background: var(--sl-bg-card);
+  border-bottom: var(--sl-border);
+}
+.m-vids-folder {
+  flex: 1; display: flex; align-items: center; gap: 6px;
+  font-size: 14px; color: var(--el-text-color-primary);
+  min-width: 0;
+}
+.m-vids-folder-text {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 220px;
+}
+.m-vids-count { font-size: 12px; color: var(--el-text-color-secondary); }
+
+.m-page .body { padding: 8px; }
+.m-page .grid {
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+.m-page .name { font-size: 12px; }
+.m-page .meta { padding: 8px 10px; }
+
+.m-player-box {
+  background: #000;
+  height: calc(100% - 46px);
+  display: flex; align-items: center; justify-content: center;
+}
+.m-player { width: 100%; max-height: 100%; }
 </style>

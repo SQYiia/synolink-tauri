@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import type { ActionSheetAction } from 'vant'
 import { dsm } from '../api/dsm'
 import { formatBytes, formatSpeed } from '../utils/format'
 import { useDownloadStation, getStatusLabel, type DSTask } from '../composables/useDownloadStation'
 import FolderPicker from '../components/FolderPicker.vue'
+import { useIsMobile } from '../composables/useIsMobile'
+import { confirm } from '../utils/feedback'
 
 const { tasks, statistic, loading, available, reason, startPolling, retry, createTask, createTaskFile, pauseTasks, resumeTasks, deleteTasks } = useDownloadStation()
 
@@ -23,10 +26,30 @@ const btResults = ref<any[]>([])
 const btTaskId = ref('')
 const btFinished = ref(false)
 
-const isMobile = computed(() => typeof window !== 'undefined' && window.innerWidth <= 640)
+const isMobile = useIsMobile()
 const dialogWidth = computed(() => isMobile.value ? '92%' : '500px')
 const dialogWidthLg = computed(() => isMobile.value ? '95%' : '640px')
 const selectedIds = computed(() => selected.value.map(t => t.id))
+
+// 移动端任务操作 sheet
+const sheetOpen = ref(false)
+const sheetActions = ref<ActionSheetAction[]>([])
+function openTaskActions(task: DSTask) {
+  const actions: ActionSheetAction[] = []
+  if (task.status === 'downloading' || task.status === 'waiting' || task.status === 'seeding') {
+    actions.push({ name: '暂停', callback: () => pauseTasks([task.id]) } as any)
+  }
+  if (task.status === 'paused') {
+    actions.push({ name: '恢复', callback: () => resumeTasks([task.id]) } as any)
+  }
+  actions.push({ name: '删除', color: '#EF4444', callback: () => handleDeleteOne(task) } as any)
+  sheetActions.value = actions
+  sheetOpen.value = true
+}
+function onSheetSelect(action: ActionSheetAction) {
+  sheetOpen.value = false
+  ;(action as any).callback?.()
+}
 
 function progress(t: DSTask) {
   if (!t.size) return 0
@@ -108,13 +131,15 @@ async function handleResume() {
 
 async function handleDelete() {
   if (!selectedIds.value.length) return
-  await ElMessageBox.confirm(`确定删除选中的 ${selectedIds.value.length} 个任务？`, '删除任务', { type: 'warning' })
+  const ok = await confirm(`确定删除选中的 ${selectedIds.value.length} 个任务？`, '删除任务', { danger: true, confirmText: '删除' })
+  if (!ok) return
   await deleteTasks(selectedIds.value)
   selected.value = []
 }
 
 async function handleDeleteOne(task: DSTask) {
-  await ElMessageBox.confirm(`确定删除「${task.title}」？`, '删除任务', { type: 'warning' })
+  const ok = await confirm(`确定删除「${task.title}」？`, '删除任务', { danger: true, confirmText: '删除' })
+  if (!ok) return
   await deleteTasks([task.id])
 }
 
@@ -229,8 +254,8 @@ onMounted(() => {
         <el-button size="small" type="danger" @click="handleDelete">删除</el-button>
       </div>
 
-      <!-- 任务表 -->
-      <div class="ds-body">
+      <!-- 任务表（桌面） -->
+      <div v-if="!isMobile" class="ds-body">
         <el-table
           v-if="tasks.length"
           :data="tasks"
@@ -286,13 +311,58 @@ onMounted(() => {
           </el-table-column>
         </el-table>
 
-        <!-- 空状态 -->
         <div v-else class="ds-empty">
           <el-icon :size="36"><Download /></el-icon>
           <p>暂无下载任务</p>
           <el-button type="primary" @click="createOpen = true">新建任务</el-button>
         </div>
       </div>
+
+      <!-- 任务列表（移动端） -->
+      <div v-else class="ds-body">
+        <van-empty v-if="!tasks.length" description="暂无下载任务">
+          <van-button round type="primary" @click="createOpen = true">新建任务</van-button>
+        </van-empty>
+        <van-cell-group v-else inset>
+          <van-swipe-cell v-for="t in tasks" :key="t.id">
+            <van-cell @click="openTaskActions(t)">
+              <template #title>
+                <div class="m-task-title">
+                  <span>{{ typeIcon(t.type) }}</span>
+                  <span class="m-task-name">{{ t.title }}</span>
+                </div>
+                <div class="m-task-meta">
+                  <van-tag :type="getStatusLabel(t.status).type as any" size="medium" plain>
+                    {{ getStatusLabel(t.status).label }}
+                  </van-tag>
+                  <span v-if="t.size">{{ formatBytes(t.size) }}</span>
+                  <span v-if="taskSpeed(t)">{{ taskSpeed(t) }}</span>
+                </div>
+                <van-progress
+                  v-if="t.size"
+                  :percentage="progress(t)"
+                  :color="progressColor(t)"
+                  :show-pivot="false"
+                  stroke-width="4"
+                  style="margin-top: 6px"
+                />
+              </template>
+            </van-cell>
+            <template #right>
+              <van-button square type="danger" text="删除" style="height: 100%" @click="handleDeleteOne(t)" />
+            </template>
+          </van-swipe-cell>
+        </van-cell-group>
+      </div>
+
+      <van-action-sheet
+        v-if="isMobile"
+        v-model:show="sheetOpen"
+        :actions="sheetActions"
+        cancel-text="取消"
+        close-on-click-action
+        @select="onSheetSelect"
+      />
     </template>
 
     <!-- 新建任务对话框 -->
@@ -462,6 +532,19 @@ onMounted(() => {
 .bt-search-bar { display: flex; gap: 8px; margin-bottom: 12px; }
 .bt-results { max-height: 450px; overflow-y: auto; }
 .bt-loading-hint { text-align: center; padding: 8px 0; }
+
+/* Mobile */
+.m-task-title { display: flex; align-items: center; gap: 6px; }
+.m-task-name {
+  font-size: 14px; font-weight: 500; color: var(--el-text-color-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  flex: 1; min-width: 0;
+}
+.m-task-meta {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 4px;
+  font-size: 12px; color: var(--el-text-color-secondary);
+}
 
 @media (max-width: 640px) {
   .ds-page {

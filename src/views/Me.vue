@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
 import { useAppStore } from '../stores/app'
 import { dsm } from '../api/dsm'
 import { formatBytes, formatSpeed } from '../utils/format'
+import { useIsMobile } from '../composables/useIsMobile'
+import { confirm, toast } from '../utils/feedback'
 
 const router = useRouter()
 const app = useAppStore()
+const isMobile = useIsMobile()
 
 const loading = ref(false)
 const cpuPct = ref(0)
@@ -24,7 +26,6 @@ const disks = ref<any[]>([])
 const sharesCount = ref(0)
 const lastUpdate = ref('')
 
-// 历史趋势数据（最近60个采样点 = 5分钟 @5s间隔）
 const HISTORY_MAX = 60
 const cpuHistory = ref<number[]>([])
 const memHistory = ref<number[]>([])
@@ -125,9 +126,6 @@ async function refreshDisks() {
   } catch (e) { console.warn('[Me] refreshDisks failed:', e) }
 }
 
-// DSM 不同版本、不同存储后端返回的字段名不一致：可能平铺为 size_total / size_free_user，
-// 也可能嵌套为 size: { total, used, free_user }，且数值常以字符串字节数返回。
-// 这里统一规范化，保证 UI 能正确取到 size/used/free。
 function normalizeVolume(v: any) {
   const sizeObj = (v?.size && typeof v.size === 'object') ? v.size : null
   const size = Number(
@@ -177,7 +175,6 @@ async function refreshShares() {
   } catch (e) { console.warn('[Me] refreshShares failed:', e) }
 }
 
-// ============ 缩略图本地缓存 ============
 const cacheSize = ref(0)
 const cacheCount = ref(0)
 const cacheBusy = ref(false)
@@ -194,20 +191,15 @@ async function refreshCacheStats() {
 }
 
 async function clearCache() {
-  try {
-    await ElMessageBox.confirm('确定清除全部缩略图缓存？后续访问相册将重新从 NAS 拉取。', '清除缓存', {
-      confirmButtonText: '清除',
-      cancelButtonText: '取消',
-      type: 'warning',
-    })
-  } catch { return }
+  const ok = await confirm('确定清除全部缩略图缓存？后续访问相册将重新从 NAS 拉取。', '清除缓存', { danger: true, confirmText: '清除' })
+  if (!ok) return
   cacheBusy.value = true
   try {
     const removed = await invoke<number>('clear_thumb_cache')
-    ElMessage.success(`已释放 ${formatBytes(Number(removed) || 0)}`)
+    toast(`已释放 ${formatBytes(Number(removed) || 0)}`, 'success')
     await refreshCacheStats()
   } catch (e) {
-    ElMessage.error('清除失败：' + String(e))
+    toast('清除失败：' + String(e), 'error')
   } finally {
     cacheBusy.value = false
   }
@@ -230,6 +222,8 @@ function pctColor(p: number) {
 }
 
 async function logout() {
+  const ok = await confirm('确定注销当前账户？', '注销', { danger: true, confirmText: '注销' })
+  if (!ok) return
   try { await dsm.logout() } catch (e) { console.warn('[Me] logout failed:', e) }
   dsm.synoToken = ''
   dsm.sid = ''
@@ -242,8 +236,8 @@ function switchServer() {
 </script>
 
 <template>
-  <div class="page" v-loading="loading">
-    <!-- 顶部个人区 -->
+  <!-- 桌面端 -->
+  <div v-if="!isMobile" class="page" v-loading="loading">
     <div class="profile">
       <div class="profile-left">
         <div class="avatar">
@@ -259,7 +253,6 @@ function switchServer() {
       </el-button>
     </div>
 
-    <!-- 监控区 -->
     <div class="section-title">
       <span>SYSTEM STATUS</span>
       <span class="right">{{ lastUpdate || '—' }}</span>
@@ -312,7 +305,6 @@ function switchServer() {
       </div>
     </div>
 
-    <!-- 存储卷 -->
     <div class="section-title" v-if="volumes.length"><span>STORAGE</span></div>
     <div class="volumes">
       <div v-for="v in volumes" :key="v.id ?? v.volume_path ?? v._name" class="vol-card">
@@ -327,7 +319,6 @@ function switchServer() {
       </div>
     </div>
 
-    <!-- 磁盘健康 -->
     <div class="section-title" v-if="disks.length"><span>DISK HEALTH</span></div>
     <div class="disks" v-if="disks.length">
       <div v-for="d in disks" :key="d.id ?? d._name" class="disk-card">
@@ -345,14 +336,12 @@ function switchServer() {
       </div>
     </div>
 
-    <!-- 账户信息区 -->
     <div class="section-title"><span>ACCOUNT</span></div>
     <div class="info-card">
       <div class="info-row"><span>共享文件夹</span><b>{{ sharesCount }}</b></div>
       <div class="info-row"><span>SynoToken</span><b>{{ dsm.synoToken ? '已注入' : '未下发' }}</b></div>
     </div>
 
-    <!-- 本地缓存 -->
     <div class="section-title">
       <span>LOCAL CACHE</span>
       <span class="right">上限 {{ formatBytes(CACHE_LIMIT_BYTES) }}</span>
@@ -378,149 +367,259 @@ function switchServer() {
       </div>
     </div>
 
-    <!-- 操作区 -->
     <div class="actions">
       <el-button @click="switchServer" style="width: 100%">切换服务器</el-button>
       <el-button type="danger" @click="logout" style="width: 100%; margin-top: 8px">注销登录</el-button>
     </div>
   </div>
+
+  <!-- 移动端 -->
+  <div v-else class="m-me">
+    <!-- 头像 / 账户区 -->
+    <div class="m-profile-card">
+      <div class="m-avatar">
+        <van-icon name="manager" size="28" />
+      </div>
+      <div class="m-profile-info">
+        <div class="m-profile-name">{{ app.accounts.find(a => a.id === app.currentAccountId)?.account || '未登录' }}</div>
+        <div class="m-profile-sub">{{ dsm.baseUrl || '—' }}</div>
+      </div>
+      <van-icon name="replay" size="20" @click="refreshAll" />
+    </div>
+
+    <!-- 系统状态 -->
+    <div class="m-group-title">
+      <span>系统状态</span>
+      <span class="m-group-right">{{ lastUpdate || '—' }}</span>
+    </div>
+    <van-cell-group inset>
+      <van-cell title="CPU 使用率" :value="cpuPct + '%'" />
+      <van-cell title="内存使用">
+        <template #value>
+          <span>{{ memPct }}% · {{ formatBytes(memUsed) }} / {{ formatBytes(memTotal) }}</span>
+        </template>
+      </van-cell>
+      <van-cell title="网络">
+        <template #value>
+          <span>↑ {{ formatSpeed(netSend) }} · ↓ {{ formatSpeed(netRecv) }}</span>
+        </template>
+      </van-cell>
+      <van-cell title="磁盘 I/O">
+        <template #value>
+          <span>R {{ formatSpeed(diskRead) }} · W {{ formatSpeed(diskWrite) }}</span>
+        </template>
+      </van-cell>
+    </van-cell-group>
+
+    <!-- 存储卷 -->
+    <template v-if="volumes.length">
+      <div class="m-group-title"><span>存储</span></div>
+      <van-cell-group inset>
+        <van-cell v-for="v in volumes" :key="v.id ?? v.volume_path ?? v._name">
+          <template #title>
+            <div class="m-vol-row">
+              <span class="m-vol-name">{{ v._name }}</span>
+              <span class="m-vol-pct">{{ volPct(v) }}%</span>
+            </div>
+            <van-progress
+              :percentage="volPct(v)"
+              :color="pctColor(volPct(v))"
+              :show-pivot="false"
+              stroke-width="4"
+              style="margin-top: 6px"
+            />
+            <div class="m-vol-detail">{{ formatBytes(v._used) }} / {{ formatBytes(v._size) }}</div>
+          </template>
+        </van-cell>
+      </van-cell-group>
+    </template>
+
+    <!-- 磁盘健康 -->
+    <template v-if="disks.length">
+      <div class="m-group-title"><span>磁盘</span></div>
+      <van-cell-group inset>
+        <van-cell v-for="d in disks" :key="d.id ?? d._name">
+          <template #title>
+            <div class="m-vol-row">
+              <span class="m-vol-name">{{ d._name }}</span>
+              <span
+                class="m-disk-status"
+                :class="String(d._status).toLowerCase() === 'normal' ? 'ok' : 'warn'"
+              >{{ d._status || '未知' }}</span>
+            </div>
+            <div class="m-vol-detail">
+              <span v-if="d._model">{{ d._model }}</span>
+              <span v-if="d._temp"> · {{ d._temp }}°C</span>
+              <span v-if="d._size"> · {{ formatBytes(d._size) }}</span>
+            </div>
+          </template>
+        </van-cell>
+      </van-cell-group>
+    </template>
+
+    <!-- 账户信息 -->
+    <div class="m-group-title"><span>账户</span></div>
+    <van-cell-group inset>
+      <van-cell title="共享文件夹" :value="String(sharesCount)" />
+      <van-cell title="SynoToken" :value="dsm.synoToken ? '已注入' : '未下发'" />
+    </van-cell-group>
+
+    <!-- 缓存 -->
+    <div class="m-group-title">
+      <span>本地缓存</span>
+      <span class="m-group-right">上限 {{ formatBytes(CACHE_LIMIT_BYTES) }}</span>
+    </div>
+    <van-cell-group inset>
+      <van-cell>
+        <template #title>
+          <div class="m-vol-row">
+            <span class="m-vol-name">缩略图缓存</span>
+            <span class="m-vol-pct">{{ cachePct() }}%</span>
+          </div>
+          <van-progress
+            :percentage="cachePct()"
+            :color="pctColor(cachePct())"
+            :show-pivot="false"
+            stroke-width="4"
+            style="margin-top: 6px"
+          />
+          <div class="m-vol-detail">
+            {{ formatBytes(cacheSize) }} / {{ formatBytes(CACHE_LIMIT_BYTES) }} · {{ cacheCount }} 个文件
+          </div>
+        </template>
+      </van-cell>
+      <van-cell title="清除缓存" is-link clickable @click="clearCache" :value="cacheBusy ? '处理中...' : ''" />
+    </van-cell-group>
+
+    <!-- 操作 -->
+    <div class="m-group-title"><span>操作</span></div>
+    <van-cell-group inset>
+      <van-cell title="切换服务器" is-link clickable @click="switchServer" />
+      <van-cell title="注销登录" is-link clickable @click="logout" title-style="color: var(--el-color-danger)" />
+    </van-cell-group>
+
+    <div class="m-bottom-pad" />
+  </div>
 </template>
 
 <style scoped>
+/* Desktop */
 .page { padding: 24px 28px; max-width: 960px; margin: 0 auto; }
-
-/* Profile */
 .profile {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 0;
-  border-bottom: var(--sl-border);
-  margin-bottom: 8px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 0; border-bottom: var(--sl-border); margin-bottom: 8px;
 }
 .profile-left { display: flex; align-items: center; gap: 12px; }
 .avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: var(--sl-radius-sm);
-  background: var(--el-color-primary-light-9);
-  color: var(--sl-primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  width: 36px; height: 36px; border-radius: var(--sl-radius-sm);
+  background: var(--el-color-primary-light-9); color: var(--sl-primary);
+  display: flex; align-items: center; justify-content: center;
 }
 .info { flex: 1; }
 .name { font-size: 14px; font-weight: 600; color: var(--el-text-color-primary); }
 .sub { color: var(--el-text-color-secondary); font-size: 12px; margin-top: 2px; }
-
-/* Section titles */
 .section-title {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+  display: flex; justify-content: space-between; align-items: center;
   margin: 24px 0 12px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  color: var(--el-text-color-secondary);
-  text-transform: uppercase;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.05em;
+  color: var(--el-text-color-secondary); text-transform: uppercase;
 }
 .section-title .right { font-weight: 400; font-size: 11px; letter-spacing: 0; text-transform: none; }
-
-/* Stat cards grid */
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
 .stat-card {
-  display: flex;
-  border-radius: var(--sl-radius-sm);
-  border: var(--sl-border);
-  background: var(--sl-bg-card);
-  overflow: hidden;
+  display: flex; border-radius: var(--sl-radius-sm); border: var(--sl-border);
+  background: var(--sl-bg-card); overflow: hidden;
 }
-.stat-accent {
-  width: 4px;
-  flex-shrink: 0;
-}
+.stat-accent { width: 4px; flex-shrink: 0; }
 .accent-blue { background: #3B82F6; }
 .accent-indigo { background: #6366F1; }
 .accent-green { background: #10B981; }
 .accent-amber { background: #F59E0B; }
-.stat-body {
-  flex: 1;
-  padding: 14px 16px;
-  min-width: 0;
-}
+.stat-body { flex: 1; padding: 14px 16px; min-width: 0; }
 .stat-label { font-size: 11px; font-weight: 600; color: var(--el-text-color-secondary); letter-spacing: 0.03em; text-transform: uppercase; }
 .stat-number { font-size: 28px; font-weight: 700; color: var(--el-text-color-primary); margin-top: 4px; line-height: 1.1; }
 .stat-unit { font-size: 14px; font-weight: 500; margin-left: 2px; color: var(--el-text-color-secondary); }
 .stat-detail { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 4px; }
 .stat-rows { margin-top: 8px; }
-.stat-row {
-  display: flex;
-  justify-content: space-between;
-  padding: 4px 0;
-  font-size: 13px;
-  color: var(--el-text-color-regular);
-}
+.stat-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; color: var(--el-text-color-regular); }
 .stat-row b { font-weight: 600; color: var(--el-text-color-primary); }
 .sparkline { width: 100%; height: 24px; margin-top: 8px; }
-
-/* Volumes */
 .volumes { display: flex; flex-direction: column; gap: 8px; }
 .vol-card {
-  background: var(--sl-bg-card);
-  border-radius: var(--sl-radius-sm);
-  padding: 12px 16px;
-  border: var(--sl-border);
+  background: var(--sl-bg-card); border-radius: var(--sl-radius-sm);
+  padding: 12px 16px; border: var(--sl-border);
 }
 .vol-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .vol-name { font-weight: 500; font-size: 13px; color: var(--el-text-color-primary); }
 .vol-pct { font-size: 13px; font-weight: 600; color: var(--el-text-color-primary); }
-.vol-bar {
-  height: 4px;
-  border-radius: 2px;
-  background: var(--el-fill-color);
-  overflow: hidden;
-}
-.vol-fill {
-  height: 100%;
-  border-radius: 2px;
-  transition: width var(--sl-transition-slow);
-}
+.vol-bar { height: 4px; border-radius: 2px; background: var(--el-fill-color); overflow: hidden; }
+.vol-fill { height: 100%; border-radius: 2px; transition: width var(--sl-transition-slow); }
 .vol-detail { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 6px; }
-
-/* Disks */
 .disks { display: flex; flex-direction: column; gap: 8px; }
-.disk-card {
-  background: var(--sl-bg-card);
-  border-radius: var(--sl-radius-sm);
-  padding: 12px 16px;
-  border: var(--sl-border);
-}
+.disk-card { background: var(--sl-bg-card); border-radius: var(--sl-radius-sm); padding: 12px 16px; border: var(--sl-border); }
 .disk-head { display: flex; justify-content: space-between; align-items: center; }
 .disk-name { font-weight: 500; font-size: 13px; color: var(--el-text-color-primary); }
 .disk-status { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: var(--sl-radius-sm); }
 .disk-status.ok { background: rgba(16, 185, 129, 0.1); color: #10B981; }
 .disk-status.warn { background: rgba(239, 68, 68, 0.1); color: #EF4444; }
 .disk-detail { display: flex; gap: 12px; margin-top: 6px; font-size: 12px; color: var(--el-text-color-secondary); }
-
-/* Info card */
-.info-card {
-  background: var(--sl-bg-card);
-  border-radius: var(--sl-radius-sm);
-  padding: 4px 16px;
-  border: var(--sl-border);
-}
+.info-card { background: var(--sl-bg-card); border-radius: var(--sl-radius-sm); padding: 4px 16px; border: var(--sl-border); }
 .info-row {
-  display: flex;
-  justify-content: space-between;
-  padding: 12px 0;
+  display: flex; justify-content: space-between; padding: 12px 0;
   border-bottom: 1px solid var(--el-border-color-lighter);
 }
 .info-row:last-child { border-bottom: 0; }
 .info-row span { color: var(--el-text-color-regular); font-size: 13px; }
 .info-row b { color: var(--el-text-color-primary); font-size: 13px; }
-
-/* Actions */
 .actions { margin-top: 24px; }
 .cache-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+
+/* Mobile */
+.m-me {
+  min-height: 100%;
+  background: var(--sl-bg-page);
+}
+.m-profile-card {
+  display: flex; align-items: center; gap: 12px;
+  margin: 12px;
+  padding: 16px;
+  background: var(--sl-bg-card);
+  border-radius: 12px;
+}
+.m-avatar {
+  width: 56px; height: 56px;
+  border-radius: 16px;
+  background: var(--el-color-primary-light-9);
+  color: var(--sl-primary);
+  display: flex; align-items: center; justify-content: center;
+}
+.m-profile-info { flex: 1; min-width: 0; }
+.m-profile-name {
+  font-size: 17px; font-weight: 600; color: var(--el-text-color-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.m-profile-sub {
+  font-size: 12px; color: var(--el-text-color-secondary); margin-top: 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.m-group-title {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 16px 28px 6px;
+  font-size: 13px; color: var(--el-text-color-secondary);
+}
+.m-group-right { font-size: 11px; color: var(--el-text-color-placeholder); }
+
+.m-vol-row {
+  display: flex; justify-content: space-between; align-items: center;
+}
+.m-vol-name { font-size: 14px; font-weight: 500; color: var(--el-text-color-primary); }
+.m-vol-pct { font-size: 13px; color: var(--el-text-color-primary); font-weight: 600; }
+.m-vol-detail { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 4px; }
+.m-disk-status {
+  font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 6px;
+}
+.m-disk-status.ok { background: rgba(16, 185, 129, 0.1); color: #10B981; }
+.m-disk-status.warn { background: rgba(239, 68, 68, 0.1); color: #EF4444; }
+.m-bottom-pad { height: 30px; }
 </style>

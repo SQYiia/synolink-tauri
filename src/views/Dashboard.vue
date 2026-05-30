@@ -4,9 +4,21 @@ import { useRouter } from 'vue-router'
 import { useAppStore } from '../stores/app'
 import { dsm } from '../api/dsm'
 import { formatBytes, formatSpeed } from '../utils/format'
+import { useIsMobile } from '../composables/useIsMobile'
+import FolderIcon from '../components/FolderIcon.vue'
 
 const router = useRouter()
 const app = useAppStore()
+const isMobile = useIsMobile()
+const refreshing = ref(false)
+async function onPullRefresh() {
+  refreshing.value = true
+  try {
+    await refreshUtil()
+  } finally {
+    refreshing.value = false
+  }
+}
 
 const cpuPct = ref(0)
 const memPct = ref(0)
@@ -43,6 +55,7 @@ async function refreshUtil() {
   } catch { /* ignore */ }
 }
 
+// 桌面端用 EP icon 名（已全局注册）
 const apps = [
   { to: '/app/files', label: '文件', icon: 'Folder', color: '#3B82F6' },
   { to: '/app/album', label: '相册', icon: 'Picture', color: '#EC4899' },
@@ -50,6 +63,16 @@ const apps = [
   { to: '/app/downloads', label: '下载站', icon: 'Connection', color: '#10B981' },
   { to: '/app/vmm', label: '虚拟机', icon: 'Monitor', color: '#F59E0B' },
   { to: '/app/me', label: '设置', icon: 'User', color: '#6B7280' },
+]
+
+// 移动端用 Vant 字体图标名（folder 用自定义 SVG）
+const mobileApps = [
+  { to: '/app/files', label: '文件', icon: 'folder', color: '#3B82F6' },
+  { to: '/app/album', label: '相册', icon: 'photo-o', color: '#EC4899' },
+  { to: '/app/videos', label: '视频', icon: 'video-o', color: '#8B5CF6' },
+  { to: '/app/downloads', label: '下载站', icon: 'down', color: '#10B981' },
+  { to: '/app/vmm', label: '虚拟机', icon: 'cluster-o', color: '#F59E0B' },
+  { to: '/app/me', label: '设置', icon: 'user-o', color: '#6B7280' },
 ]
 
 function goTo(path: string) {
@@ -67,7 +90,52 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="dash-page">
+  <van-pull-refresh v-if="isMobile" v-model="refreshing" @refresh="onPullRefresh">
+    <div class="dash-page">
+      <div class="dash-profile">
+        <div class="dash-profile-left">
+          <div class="dash-avatar">
+            <el-icon :size="18"><UserFilled /></el-icon>
+          </div>
+          <div class="dash-user-info">
+            <div class="dash-username">{{ app.accounts.find(a => a.id === app.currentAccountId)?.account || '—' }}</div>
+            <div class="dash-host">{{ dsm.baseUrl || '—' }}</div>
+          </div>
+        </div>
+      </div>
+
+      <van-cell-group inset style="margin: 0">
+        <van-cell title="CPU 使用率" :value="cpuPct + '%'" />
+        <van-cell title="内存">
+          <template #value>{{ formatBytes(memUsed) }} / {{ formatBytes(memTotal) }}</template>
+        </van-cell>
+        <van-cell title="网络">
+          <template #value>↑ {{ formatSpeed(netSend) }} · ↓ {{ formatSpeed(netRecv) }}</template>
+        </van-cell>
+        <van-cell title="磁盘">
+          <template #value>R {{ formatSpeed(diskRead) }} · W {{ formatSpeed(diskWrite) }}</template>
+        </van-cell>
+      </van-cell-group>
+
+      <div class="dash-section-title">功能</div>
+      <div class="m-dash-grid-wrap">
+        <div
+          v-for="item in mobileApps"
+          :key="item.to"
+          class="m-dash-tile"
+          @click="goTo(item.to)"
+        >
+          <div class="m-dash-tile-icon" :style="{ background: item.color + '15', color: item.color }">
+            <FolderIcon v-if="item.icon === 'folder'" :size="22" />
+            <van-icon v-else :name="item.icon" :size="22" />
+          </div>
+          <div class="m-dash-tile-label">{{ item.label }}</div>
+        </div>
+      </div>
+    </div>
+  </van-pull-refresh>
+
+  <div v-else class="dash-page">
     <!-- 顶部个人栏 -->
     <div class="dash-profile">
       <div class="dash-profile-left">
@@ -280,6 +348,37 @@ onUnmounted(() => {
   justify-content: center;
 }
 .dash-app-label {
+  font-size: 12px;
+  color: var(--el-text-color-primary);
+  font-weight: 500;
+}
+
+/* Mobile-only tweaks */
+.m-dash-grid-wrap {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 8px 12px;
+}
+.m-dash-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 4px;
+  background: var(--sl-bg-card);
+  border-radius: 12px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--sl-transition-fast);
+}
+.m-dash-tile:active { background: var(--el-fill-color-light); }
+.m-dash-tile-icon {
+  width: 48px; height: 48px;
+  border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+}
+.m-dash-tile-label {
   font-size: 12px;
   color: var(--el-text-color-primary);
   font-weight: 500;
