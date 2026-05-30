@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '../stores/app'
 import { dsm } from '../api/dsm'
@@ -55,27 +55,50 @@ async function refreshUtil() {
   } catch { /* ignore */ }
 }
 
-// 桌面端用 EP icon 名（已全局注册）
-const apps = [
-  { to: '/app/files', label: '文件', icon: 'Folder', color: '#3B82F6' },
-  { to: '/app/album', label: '相册', icon: 'Picture', color: '#EC4899' },
-  { to: '/app/videos', label: '视频', icon: 'VideoCamera', color: '#8B5CF6' },
-  { to: '/app/downloads', label: '下载站', icon: 'Connection', color: '#10B981' },
-  { to: '/app/vmm', label: '虚拟机', icon: 'Monitor', color: '#F59E0B' },
-  { to: '/app/me', label: '设置', icon: 'User', color: '#6B7280' },
+interface DashApp {
+  id: string
+  label: string
+  to: string
+  icon: string
+  color: string
+}
+
+const ALL_APPS: DashApp[] = [
+  { id: 'files',      label: '文件',   to: '/app/files',      icon: 'Folder',       color: '#3B82F6' },
+  { id: 'album',      label: '相册',   to: '/app/album',      icon: 'Picture',      color: '#EC4899' },
+  { id: 'videos',     label: '视频',   to: '/app/videos',     icon: 'VideoCamera',  color: '#8B5CF6' },
+  { id: 'downloads',  label: '下载站', to: '/app/downloads',  icon: 'Connection',   color: '#10B981' },
+  { id: 'monitor',    label: '性能',   to: '/app/monitor',    icon: 'Odometer',     color: '#06B6D4' },
+  { id: 'vmm',        label: '虚拟机', to: '/app/vmm',        icon: 'Monitor',      color: '#F59E0B' },
+  { id: 'me',         label: '设置',   to: '/app/me',         icon: 'User',         color: '#6B7280' },
 ]
 
-// 移动端用 Vant 字体图标名（folder 用自定义 SVG）
-const mobileApps = [
-  { to: '/app/files', label: '文件', icon: 'folder', color: '#3B82F6' },
-  { to: '/app/album', label: '相册', icon: 'photo-o', color: '#EC4899' },
-  { to: '/app/videos', label: '视频', icon: 'video-o', color: '#8B5CF6' },
-  { to: '/app/downloads', label: '下载站', icon: 'down', color: '#10B981' },
-  { to: '/app/vmm', label: '虚拟机', icon: 'cluster-o', color: '#F59E0B' },
-  { to: '/app/me', label: '设置', icon: 'user-o', color: '#6B7280' },
-]
+const MOBILE_ICON_MAP: Record<string, string> = {
+  Folder: 'folder', Picture: 'photo-o', VideoCamera: 'video-o',
+  Connection: 'down', Odometer: 'bar-chart-o', Monitor: 'cluster-o', User: 'user-o',
+}
+
+const LS_HIDDEN_KEY = 'synolink.dashHiddenApps'
+const hiddenIds = ref<Set<string>>(loadHidden())
+
+function loadHidden(): Set<string> {
+  try { return new Set(JSON.parse(localStorage.getItem(LS_HIDDEN_KEY) || '[]')) } catch { return new Set() }
+}
+function saveHidden() {
+  localStorage.setItem(LS_HIDDEN_KEY, JSON.stringify([...hiddenIds.value]))
+}
+function toggleApp(id: string) {
+  if (hiddenIds.value.has(id)) hiddenIds.value.delete(id)
+  else hiddenIds.value.add(id)
+  hiddenIds.value = new Set(hiddenIds.value)
+  saveHidden()
+}
+
+const visibleApps = computed(() => ALL_APPS.filter(a => !hiddenIds.value.has(a.id)))
+const editing = ref(false)
 
 function goTo(path: string) {
+  if (editing.value) return
   router.push(path)
 }
 
@@ -117,19 +140,28 @@ onUnmounted(() => {
         </van-cell>
       </van-cell-group>
 
-      <div class="dash-section-title">功能</div>
+      <div class="dash-section-title">
+        功能
+        <button class="dash-edit-btn" @click="editing = !editing">
+          {{ editing ? '完成' : '编辑' }}
+        </button>
+      </div>
       <div class="m-dash-grid-wrap">
         <div
-          v-for="item in mobileApps"
-          :key="item.to"
+          v-for="item in (editing ? ALL_APPS : visibleApps)"
+          :key="item.id"
           class="m-dash-tile"
-          @click="goTo(item.to)"
+          :class="{ 'm-dash-tile-hidden': editing && hiddenIds.has(item.id) }"
+          @click="editing ? toggleApp(item.id) : goTo(item.to)"
         >
           <div class="m-dash-tile-icon" :style="{ background: item.color + '15', color: item.color }">
-            <FolderIcon v-if="item.icon === 'folder'" :size="22" />
-            <van-icon v-else :name="item.icon" :size="22" />
+            <FolderIcon v-if="item.icon === 'Folder'" :size="22" />
+            <van-icon v-else :name="MOBILE_ICON_MAP[item.icon] || item.icon" :size="22" />
           </div>
           <div class="m-dash-tile-label">{{ item.label }}</div>
+          <div v-if="editing" class="m-dash-tile-check">
+            <van-icon :name="hiddenIds.has(item.id) ? 'circle' : 'success'" :size="18" :color="hiddenIds.has(item.id) ? 'hsl(var(--muted-foreground))' : item.color" />
+          </div>
         </div>
       </div>
     </div>
@@ -199,18 +231,27 @@ onUnmounted(() => {
     </div>
 
     <!-- 功能宫格 -->
-    <div class="dash-section-title">功能</div>
+    <div class="dash-section-title">
+      功能
+      <el-button size="small" link @click="editing = !editing">
+        {{ editing ? '完成' : '编辑' }}
+      </el-button>
+    </div>
     <div class="dash-grid">
       <div
-        v-for="item in apps"
-        :key="item.to"
+        v-for="item in (editing ? ALL_APPS : visibleApps)"
+        :key="item.id"
         class="dash-app-item"
-        @click="goTo(item.to)"
+        :class="{ 'dash-app-item-hidden': editing && hiddenIds.has(item.id) }"
+        @click="editing ? toggleApp(item.id) : goTo(item.to)"
       >
         <div class="dash-app-icon" :style="{ background: item.color + '15', color: item.color }">
           <el-icon :size="24"><component :is="item.icon" /></el-icon>
         </div>
         <span class="dash-app-label">{{ item.label }}</span>
+        <el-icon v-if="editing" class="dash-app-check" :color="hiddenIds.has(item.id) ? undefined : item.color">
+          <component :is="hiddenIds.has(item.id) ? 'CircleClose' : 'CircleCheck'" />
+        </el-icon>
       </div>
     </div>
   </div>
@@ -314,17 +355,32 @@ onUnmounted(() => {
 
 /* 功能宫格 */
 .dash-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin: 20px 0 12px;
   font-size: 13px;
   font-weight: 600;
   color: var(--el-text-color-primary);
 }
+.dash-edit-btn {
+  background: none;
+  border: none;
+  font-size: 12px;
+  color: hsl(var(--brand));
+  cursor: pointer;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.dash-edit-btn:active { background: hsl(var(--muted)); }
 .dash-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 12px;
 }
 .dash-app-item {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -338,6 +394,14 @@ onUnmounted(() => {
 }
 .dash-app-item:active {
   background: var(--el-fill-color-light);
+}
+.dash-app-item-hidden {
+  opacity: 0.4;
+}
+.dash-app-check {
+  position: absolute;
+  top: 6px;
+  right: 6px;
 }
 .dash-app-icon {
   width: 44px;
@@ -361,6 +425,7 @@ onUnmounted(() => {
   margin: 8px 12px;
 }
 .m-dash-tile {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -376,6 +441,14 @@ onUnmounted(() => {
 .m-dash-tile:active {
   background: hsl(var(--muted));
   border-color: hsl(var(--border));
+}
+.m-dash-tile-hidden {
+  opacity: 0.4;
+}
+.m-dash-tile-check {
+  position: absolute;
+  top: 6px;
+  right: 6px;
 }
 .m-dash-tile-icon {
   width: 40px; height: 40px;
