@@ -501,7 +501,7 @@ function onTabChange(i: number) {
 .m-shell-container {
   position: fixed;
   inset: 0;
-  background: #000;
+  background: hsl(var(--background));
   overflow: hidden;
   z-index: 0;
 }
@@ -516,6 +516,8 @@ function onTabChange(i: number) {
   transform: translateX(var(--swipe-tx, 0));
   will-change: transform;
   z-index: 1;
+  /* 永久允许竖向滚动 + 拒绝浏览器/系统默认横滑（让我们的边缘手势独占横向） */
+  touch-action: pan-y;
 }
 .m-shell.m-swipe-transition {
   transition: transform 0.32s cubic-bezier(0.25, 0.1, 0.25, 1);
@@ -530,9 +532,6 @@ function onTabChange(i: number) {
   background: linear-gradient(to right, rgba(0,0,0,0.18), transparent);
   pointer-events: none;
   z-index: 100;
-}
-.m-shell.m-swiping {
-  touch-action: pan-y;
 }
 .m-content {
   flex: 1;

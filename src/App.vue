@@ -400,10 +400,11 @@ body,
   border-radius: calc(var(--radius) - 2px) !important;
 }
 
-/* el-message: 居中显示 */
+/* el-message: 屏幕居中（保留 translateX(-50%) 否则水平会偏右） */
 .el-message {
   top: 50% !important;
-  transform: translateY(-50%) !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important;
 }
 
 /* ===== Vant overrides ===== */
