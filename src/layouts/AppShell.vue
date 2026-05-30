@@ -8,7 +8,7 @@ import { downloadQueue, cancelTask, removeTask, clearCompleted, downloadDir, rev
 import LocalFolderPicker from '../components/LocalFolderPicker.vue'
 import { formatBytes } from '../utils/format'
 import { useIsMobile } from '../composables/useIsMobile'
-import { useEdgeSwipeBack } from '../composables/useEdgeSwipeBack'
+import { useInteractiveSwipeBack, swipeStyle, swipeClasses } from '../composables/useInteractiveSwipeBack'
 import FolderIcon from '../components/FolderIcon.vue'
 
 const route = useRoute()
@@ -123,13 +123,8 @@ const activeTabIndex = computed(() => {
   return i === -1 ? 0 : i
 })
 
-// 全局边缘左滑返回：tab 路由下不返回，子页 router.back()
-useEdgeSwipeBack({
-  onBack: () => {
-    if (!isMobile.value) return
-    if (!route.meta?.tab) router.back()
-  },
-})
+// 全局边缘左滑返回：交互式跟手动画（仅移动端）
+useInteractiveSwipeBack()
 
 const navTitle = computed(() => (route.meta?.title as string) || 'SynoLink')
 const showNavBack = computed(() => !route.meta?.tab)
@@ -270,7 +265,8 @@ function onTabChange(i: number) {
   </div>
 
   <!-- ========== 移动端 ========== -->
-  <div v-else class="m-shell">
+  <div v-else class="m-shell-container">
+  <div class="m-shell" :style="swipeStyle" :class="swipeClasses">
     <van-nav-bar
       :title="navTitle"
       :left-arrow="showNavBack"
@@ -415,6 +411,7 @@ function onTabChange(i: number) {
       @update:model-value="(v: boolean) => { if (!v) resolveLocalPicker(null) }"
     />
   </div>
+  </div>
 </template>
 
 <style scoped>
@@ -501,14 +498,41 @@ function onTabChange(i: number) {
 .dl-actions { flex-shrink: 0; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
 
 /* ========== Mobile (shadcn-style) ========== */
+.m-shell-container {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  overflow: hidden;
+  z-index: 0;
+}
 .m-shell {
-  height: 100vh;
-  width: 100vw;
-  max-width: 100vw;
+  position: relative;
+  height: 100%;
+  width: 100%;
   display: flex;
   flex-direction: column;
   background: hsl(var(--background));
-  overflow-x: hidden;
+  overflow: hidden;
+  transform: translateX(var(--swipe-tx, 0));
+  will-change: transform;
+  z-index: 1;
+}
+.m-shell.m-swipe-transition {
+  transition: transform 0.32s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+.m-shell.m-swiping::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -12px;
+  width: 12px;
+  height: 100%;
+  background: linear-gradient(to right, rgba(0,0,0,0.18), transparent);
+  pointer-events: none;
+  z-index: 100;
+}
+.m-shell.m-swiping {
+  touch-action: pan-y;
 }
 .m-content {
   flex: 1;

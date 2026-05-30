@@ -8,7 +8,7 @@ import { enqueue as enqueueDownload } from '../composables/useDownloadQueue'
 import FolderPicker from '../components/FolderPicker.vue'
 import LazyThumb from '../components/LazyThumb.vue'
 import { useIsMobile } from '../composables/useIsMobile'
-import { useBackHandler } from '../composables/useEdgeSwipeBack'
+import { useBackHandler } from '../composables/useInteractiveSwipeBack'
 import { confirm, toast } from '../utils/feedback'
 
 const isMobile = useIsMobile()

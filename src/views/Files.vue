@@ -10,7 +10,7 @@ import { enqueue } from '../composables/useDownloadQueue'
 import FolderPicker from '../components/FolderPicker.vue'
 import FileTypeIcon from '../components/FileTypeIcon.vue'
 import { useIsMobile } from '../composables/useIsMobile'
-import { useBackHandler } from '../composables/useEdgeSwipeBack'
+import { useBackHandler } from '../composables/useInteractiveSwipeBack'
 import { confirm, prompt, toast } from '../utils/feedback'
 
 const router = useRouter()

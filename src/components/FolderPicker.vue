@@ -3,7 +3,7 @@ import { ref, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { dsm } from '../api/dsm'
 import { useIsMobile } from '../composables/useIsMobile'
-import { useBackHandler } from '../composables/useEdgeSwipeBack'
+import { useBackHandler } from '../composables/useInteractiveSwipeBack'
 import { toast } from '../utils/feedback'
 import FileTypeIcon from './FileTypeIcon.vue'
 

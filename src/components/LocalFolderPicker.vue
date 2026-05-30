@@ -2,7 +2,7 @@
 import { ref, watch, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useIsMobile } from '../composables/useIsMobile'
-import { useBackHandler } from '../composables/useEdgeSwipeBack'
+import { useBackHandler } from '../composables/useInteractiveSwipeBack'
 import { toast, prompt } from '../utils/feedback'
 import FolderIcon from './FolderIcon.vue'
 
