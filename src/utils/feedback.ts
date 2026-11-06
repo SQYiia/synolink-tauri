@@ -17,6 +17,17 @@ function isMobile() {
 }
 
 export function toast(message: string, type: ToastType = 'info') {
+  const errors: Record<string, string> = {
+    '101': '请求参数无效，请检查输入',
+    '102': '服务器未提供此功能，请检查是否安装对应套件',
+    '103': '服务器不支持此操作',
+    '104': '接口版本不兼容，请检查 DSM 与套件版本',
+    '105': '当前账号没有权限，请在 DSM 中检查应用和共享文件夹授权',
+    '106': '登录已过期，请重新登录',
+    '107': '会话已中断，请重新登录',
+    '119': '登录已失效，请重新登录或完成两步验证',
+  }
+  message = message.replace(/code=(\d+)/g, (raw, code) => errors[code] ? `${errors[code]}（${code}）` : raw)
   if (isMobile()) {
     if (type === 'success') showSuccessToast({ message, position: 'middle' })
     else if (type === 'error') showFailToast({ message, position: 'middle' })

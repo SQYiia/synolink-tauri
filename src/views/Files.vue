@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, onActivated, onDeactivated, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { showImagePreview } from 'vant'
 import type { ActionSheetAction } from 'vant'
+import { trackedUpload, startCopyMove as queueCopyMove } from '../composables/useFileOperations'
 import { dsm } from '../api/dsm'
 import { formatBytes } from '../utils/format'
-import { enqueue } from '../composables/useDownloadQueue'
+import { enqueue, chooseDownloadDir, askEveryDownload, downloadDir } from '../composables/useDownloadQueue'
 import FolderPicker from '../components/FolderPicker.vue'
 import FileTypeIcon from '../components/FileTypeIcon.vue'
+import FileContextMenu from '../components/FileContextMenu.vue'
+import { MoreFilled } from '@element-plus/icons-vue'
 import { useIsMobile } from '../composables/useIsMobile'
 import { useBackHandler } from '../composables/useInteractiveSwipeBack'
 import { confirm, prompt, toast } from '../utils/feedback'
@@ -18,7 +21,10 @@ const route = useRoute()
 const isMobile = useIsMobile()
 
 const loading = ref(false)
+const uploading = ref(false)
 const refreshing = ref(false)
+let listingGeneration = 0
+let searchController: AbortController | null = null
 const path = ref<string>('')
 const items = ref<any[]>([])
 const sortKey = ref<'name' | 'size' | 'time'>('name')
@@ -45,13 +51,13 @@ function onSortChange({ prop, order }: { prop: string; order: string | null }) {
   }
 }
 const crumbs = ref<string[]>([])
+const address = ref('')
 const uploadInput = ref<HTMLInputElement | null>(null)
 
 const thumbs = ref<Record<string, string>>({})
 let thumbGen = 0
 
 const searchPattern = ref('')
-const searchTaskId = ref('')
 const inSearchMode = ref(false)
 
 const previewOpen = ref(false)
@@ -61,9 +67,58 @@ const previewSrc = ref('')
 const previewText = ref('')
 const previewLoading = ref(false)
 
-const canUpload = computed(() => !!path.value && !inSearchMode.value)
+function onFileKey(event: KeyboardEvent) {
+  if (route.path !== '/app/files' || isMobile.value || loading.value) return
+  const target = event.target as HTMLElement
+  if (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
+  if (event.key === 'F5') { event.preventDefault(); void loadCurrent() }
+  if (event.altKey && event.key === 'ArrowUp') { event.preventDefault(); void goUp() }
+  if (event.key === 'F2' && selection.value.length === 1) { event.preventDefault(); void doRename(selection.value[0]) }
+}
+onActivated(() => window.addEventListener('keydown', onFileKey))
+onDeactivated(() => window.removeEventListener('keydown', onFileKey))
+onUnmounted(() => window.removeEventListener('keydown', onFileKey))
+watch(path, value => { address.value = value })
+watch(items, () => { selection.value = []; selectedPaths.value = new Set() })
+
+const canUpload = computed(() => !!path.value && !inSearchMode.value && !uploading.value)
 
 const selection = ref<any[]>([])
+const fileTable = ref<any>(null)
+const contextOpen = ref(false)
+const contextPoint = ref({ x: 0, y: 0 })
+const contextRows = ref<any[]>([])
+const contextItems = computed(() => [
+  { id: 'open', label: contextRows.value[0] && isRowDir(contextRows.value[0]) ? '打开文件夹' : '预览', disabled: contextRows.value.length !== 1 },
+  { id: 'download', label: '下载', disabled: !contextRows.value.some(row => !isRowDir(row)) },
+  { id: 'copy', label: '复制到…' }, { id: 'move', label: '移动到…' },
+  { id: 'rename', label: '重命名', disabled: contextRows.value.length !== 1, shortcut: 'F2' },
+  { id: 'delete', label: '删除', danger: true },
+])
+function openContext(row: any, _column: any, event: MouseEvent) {
+  event.preventDefault(); event.stopPropagation()
+  if (!selection.value.some(item => item.path === row.path)) {
+    fileTable.value?.clearSelection(); fileTable.value?.toggleRowSelection(row, true)
+  }
+  contextRows.value = selection.value.length ? [...selection.value] : [row]
+  const rect = (event.currentTarget as HTMLElement)?.getBoundingClientRect?.()
+  contextPoint.value = { x: event.clientX || rect?.left || 8, y: event.clientY || rect?.bottom || 8 }
+  contextOpen.value = true
+}
+async function runContext(id: string) {
+  const rows = [...contextRows.value], row = rows[0]
+  contextOpen.value = false
+  if (!row) return
+  try {
+    if (id === 'open') { if (isRowDir(row)) await openFolder(row); else await preview(row) }
+    if (id === 'download') for (const item of rows.filter(item => !isRowDir(item))) await doDownload(item)
+    if (id === 'copy' || id === 'move') startCopyMove(id, rows.map(item => item.path))
+    if (id === 'rename') await doRename(row)
+    if (id === 'delete') { if (rows.length === 1) await doDelete(row); else await batchDelete() }
+  } catch (error: any) { toast(error?.message || '操作失败，请重试', 'error') }
+}
+watch(items, () => { contextOpen.value = false })
+onDeactivated(() => { contextOpen.value = false })
 function onSelectionChange(rows: any[]) { selection.value = rows }
 
 // 移动端选择模式
@@ -83,7 +138,7 @@ const selectedRows = computed(() => sortedItems.value.filter(r => selectedPaths.
 
 const dragging = ref(false)
 
-const FAVORITES_KEY = 'files:favorites'
+const FAVORITES_KEY = `files:favorites:${dsm.baseUrl}:${dsm.account}`
 const favorites = ref<string[]>(loadFavorites())
 
 function loadFavorites(): string[] {
@@ -115,31 +170,10 @@ async function onCopyMoveConfirm(dest: string) {
   if (!dest || !copyMovePaths.value.length) return
   loading.value = true
   try {
-    const res = await dsm.copyMove(copyMovePaths.value, dest, false, copyMoveMode.value === 'move')
-    if (!res.success || !res.data?.taskid) {
-      toast(`操作失败 code=${res.error?.code}`, 'error')
-      return
-    }
-    const taskid = res.data.taskid
-    const MAX_WAIT = 60000
-    const POLL = 1000
-    const t0 = Date.now()
-    let finished = false
-    while (Date.now() - t0 < MAX_WAIT) {
-      await new Promise((r) => setTimeout(r, POLL))
-      const st = await dsm.copyMoveStatus(taskid)
-      if (!st.success) break
-      const data = st.data as any
-      if (data?.finished) { finished = true; break }
-      if (data?.error) break
-    }
-    if (!finished) {
-      toast('操作超时或失败，请手动确认', 'warning')
-      await loadCurrent()
-      return
-    }
-    toast(copyMoveMode.value === 'move' ? '移动成功' : '复制成功', 'success')
-    await loadCurrent()
+    await queueCopyMove(copyMovePaths.value, dest, copyMoveMode.value === 'move')
+    toast('任务已提交，可在传输中心查看进度；完成后刷新目录', 'success')
+  } catch (e: any) {
+    toast(e.message ?? '无法启动任务', 'error')
   } finally {
     loading.value = false
   }
@@ -166,17 +200,12 @@ async function batchDelete() {
   }
 }
 
-function batchDownload() {
-  const rows = isMobile.value ? selectedRows.value : selection.value
-  if (!rows.length) return
-  let count = 0
-  for (const row of rows) {
-    if (!isRowDir(row)) {
-      enqueue(row.path, row.name, Number(row.additional?.size || 0))
-      count++
-    }
-  }
-  if (count) toast(`已添加 ${count} 个文件到下载队列`, 'success')
+async function batchDownload() {
+  const rows = (isMobile.value ? selectedRows.value : selection.value).filter(row => !isRowDir(row))
+  if (!rows.length) { toast('请选择文件，暂不支持文件夹下载', 'info'); return }
+  const directory = askEveryDownload.value ? await chooseDownloadDir() : downloadDir.value
+  if (askEveryDownload.value && !directory) return
+  for (const row of rows) await enqueue(row.path, row.name, Number(row.additional?.size || 0), directory || undefined)
   if (isMobile.value) exitSelectMode()
 }
 
@@ -197,22 +226,35 @@ function onDragOver(e: DragEvent) {
   if (canUpload.value) dragging.value = true
 }
 function onDragLeave() { dragging.value = false }
+async function uploadFile(file: File, folder = path.value) {
+  if (items.value.some(row => row.name === file.name)) {
+    const replace = await confirm(`「${file.name}」已存在，是否替换？取消将跳过该文件。`, '同名文件', { danger: true, confirmText: '替换', cancelText: '跳过' })
+    if (!replace) return { success: false, error: { code: '已跳过同名文件' } }
+    return trackedUpload(folder, file, true)
+  }
+  return trackedUpload(folder, file, false)
+}
+
 async function onDrop(e: DragEvent) {
   e.preventDefault()
   dragging.value = false
   if (!canUpload.value) return
   const files = e.dataTransfer?.files
   if (!files || !files.length) return
-  loading.value = true
+  uploading.value = true
+  const sourceUrl = dsm.baseUrl
+  const sourceAccount = dsm.account
+  const folder = path.value
   try {
     for (const f of Array.from(files)) {
-      const res = await dsm.upload(path.value, f)
+      if (sourceUrl !== dsm.baseUrl || sourceAccount !== dsm.account) { toast('连接已切换，剩余上传已停止', 'warning'); break }
+      const res = await uploadFile(f, folder)
       if (res.success) ElMessage.success(`${f.name} 上传完成`)
       else ElMessage.error(`${f.name} 上传失败 code=${res.error?.code}`)
     }
-    await loadCurrent()
+    if (sourceUrl === dsm.baseUrl && folder === path.value) await loadCurrent()
   } finally {
-    loading.value = false
+    uploading.value = false
   }
 }
 
@@ -229,29 +271,43 @@ onMounted(async () => {
   }
 })
 
+watch(() => route.query.open, async (target) => {
+  if (route.path === '/app/files' && typeof target === 'string') await openFolder({ path: target, isdir: true })
+})
+
 async function loadShares() {
+  const generation = ++listingGeneration
+  searchController?.abort()
   loading.value = true
   path.value = ''
   crumbs.value = []
   inSearchMode.value = false
   try {
-    const res = await dsm.listShare({ limit: 100, additional: '["real_path","owner","time","perm","mount_point_type","volume_status"]' })
+    const res = await dsm.listAll('', '["real_path","owner","time","perm","mount_point_type","volume_status"]')
+    if (generation !== listingGeneration) return
     if (res.success) items.value = (res.data as any)?.shares ?? []
     else toast(`code=${res.error?.code}`, 'error')
+  } catch (e: any) {
+    if (generation === listingGeneration) toast(e.message ?? '加载失败，请重试', 'error')
   } finally {
-    loading.value = false
+    if (generation === listingGeneration) loading.value = false
   }
 }
 
 async function loadCurrent() {
   if (!path.value) return loadShares()
+  const generation = ++listingGeneration
+  searchController?.abort()
   loading.value = true
   try {
-    const res = await dsm.listFiles(path.value, { limit: 500, additional: '["size","time","type","perm"]' })
+    const res = await dsm.listAll(path.value)
+    if (generation !== listingGeneration) return
     if (res.success) items.value = (res.data as any)?.files ?? []
     else toast(`code=${res.error?.code}`, 'error')
+  } catch (e: any) {
+    if (generation === listingGeneration) toast(e.message ?? '加载失败，请重试', 'error')
   } finally {
-    loading.value = false
+    if (generation === listingGeneration) loading.value = false
   }
 }
 
@@ -274,10 +330,13 @@ async function openFolder(row: any) {
     await preview(row)
     return
   }
+  const generation = ++listingGeneration
+  searchController?.abort()
   loading.value = true
   try {
     const target = row.path as string
-    const res = await dsm.listFiles(target, { limit: 500, additional: '["size","time","type","perm"]' })
+    const res = await dsm.listAll(target)
+    if (generation !== listingGeneration) return
     if (res.success) {
       items.value = (res.data as any)?.files ?? []
       path.value = target
@@ -286,8 +345,10 @@ async function openFolder(row: any) {
     } else {
       toast(`code=${res.error?.code}`, 'error')
     }
+  } catch (e: any) {
+    if (generation === listingGeneration) toast(e.message ?? '加载失败，请重试', 'error')
   } finally {
-    loading.value = false
+    if (generation === listingGeneration) loading.value = false
   }
 }
 
@@ -370,9 +431,8 @@ async function doDelete(row: any) {
   }
 }
 
-function doDownload(row: any) {
-  enqueue(row.path, row.name, Number(row.additional?.size || 0))
-  toast(`已添加「${row.name}」到下载队列`, 'success')
+async function doDownload(row: any) {
+  await enqueue(row.path, row.name, Number(row.additional?.size || 0))
 }
 
 function triggerUpload() {
@@ -384,54 +444,47 @@ async function onUploadPicked(ev: Event) {
   const input = ev.target as HTMLInputElement
   const files = input.files
   if (!files || !files.length) return
-  loading.value = true
+  uploading.value = true
+  const sourceUrl = dsm.baseUrl
+  const sourceAccount = dsm.account
+  const folder = path.value
   try {
     for (const f of Array.from(files)) {
-      const res = await dsm.upload(path.value, f)
+      if (sourceUrl !== dsm.baseUrl || sourceAccount !== dsm.account) { toast('连接已切换，剩余上传已停止', 'warning'); break }
+      const res = await uploadFile(f, folder)
       if (res.success) toast(`${f.name} 上传完成`, 'success')
       else toast(`${f.name} 上传失败 code=${res.error?.code}`, 'error')
     }
-    await loadCurrent()
+    if (sourceUrl === dsm.baseUrl && folder === path.value) await loadCurrent()
   } finally {
-    loading.value = false
+    uploading.value = false
     if (input) input.value = ''
   }
 }
 
 async function doSearch() {
   if (!searchPattern.value) return
+  searchController?.abort()
+  searchController = new AbortController()
+  const signal = searchController.signal
+  const generation = ++listingGeneration
   const folder = path.value || '/'
   loading.value = true
   try {
-    const start = await dsm.searchStart(folder, searchPattern.value, true)
-    if (!start.success || !start.data?.taskid) {
-      toast('启动搜索失败', 'error')
-      return
-    }
-    searchTaskId.value = start.data.taskid
     inSearchMode.value = true
-    let results: any[] = []
-    const MAX_WAIT = 10000
-    const POLL_INTERVAL = 500
-    const startTime = Date.now()
-    while (Date.now() - startTime < MAX_WAIT) {
-      await new Promise((r) => setTimeout(r, POLL_INTERVAL))
-      const list = await dsm.searchList(searchTaskId.value, { limit: 500 })
-      if (list.success) {
-        const data = list.data as any
-        results = data?.files ?? []
-        if (data?.finished) break
-      }
-    }
+    const results = await dsm.searchAll(folder, searchPattern.value, signal)
+    if (generation !== listingGeneration || signal.aborted) return
     items.value = results
-    await dsm.searchStop(searchTaskId.value).catch(() => {})
     toast(`找到 ${results.length} 个结果`, 'success')
+  } catch (e: any) {
+    if (!signal.aborted) toast(e.message ?? '搜索失败，请重试', 'error')
   } finally {
-    loading.value = false
+    if (generation === listingGeneration) loading.value = false
   }
 }
 
 async function exitSearch() {
+  searchController?.abort()
   inSearchMode.value = false
   searchPattern.value = ''
   await loadCurrent()
@@ -557,6 +610,8 @@ watch(items, (rows) => {
 })
 
 onUnmounted(() => {
+  searchController?.abort()
+  listingGeneration++
   revokeThumbs()
 })
 
@@ -630,7 +685,7 @@ function openMoreSheet() {
 
 <template>
   <!-- ========== 桌面端 ========== -->
-  <el-container v-if="!isMobile" class="page">
+  <el-container v-if="!isMobile" class="page ui-files">
     <el-header>
       <div class="header">
         <h2 class="page-title">文件</h2>
@@ -638,6 +693,7 @@ function openMoreSheet() {
           <el-breadcrumb-item><a @click="loadShares">共享文件夹</a></el-breadcrumb-item>
           <el-breadcrumb-item v-for="(c, i) in crumbs" :key="c"><a @click="crumbJump(i)">{{ c }}</a></el-breadcrumb-item>
         </el-breadcrumb>
+        <el-input v-model="address" placeholder="输入目录路径后回车" style="width: 200px; margin-right: 8px" @keyup.enter="openFolder({ path: address, isdir: true })" />
         <el-button v-if="path" :type="isFavorite(path) ? 'warning' : undefined" circle size="small" @click="toggleFavorite(path)" title="收藏当前目录">
           <el-icon><Star /></el-icon>
         </el-button>
@@ -689,7 +745,7 @@ function openMoreSheet() {
         <el-button size="small" type="danger" @click="batchDelete">批量删除</el-button>
       </div>
 
-      <el-table :data="sortedItems" stripe @row-dblclick="openFolder" @selection-change="onSelectionChange" @sort-change="onSortChange" style="width: 100%">
+      <el-table ref="fileTable" @row-contextmenu="openContext" :row-class-name="({ row }: any) => row.path === route.query.selected ? 'search-match' : ''" :data="sortedItems" stripe @row-dblclick="openFolder" @selection-change="onSelectionChange" @sort-change="onSortChange" style="width: 100%">
         <el-table-column type="selection" width="42" />
         <el-table-column width="56">
           <template #default="{ row }">
@@ -713,17 +769,12 @@ function openMoreSheet() {
             <span v-if="row.additional?.time?.mtime">{{ new Date(row.additional.time.mtime * 1000).toLocaleString() }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="360" fixed="right">
-          <template #default="{ row }">
-            <el-button v-if="!isRowDir(row)" size="small" @click="preview(row)">预览</el-button>
-            <el-button v-if="!isRowDir(row)" size="small" @click="doDownload(row)">下载</el-button>
-            <el-button size="small" @click="startCopyMove('copy', [row.path])">复制</el-button>
-            <el-button size="small" @click="startCopyMove('move', [row.path])">移动</el-button>
-            <el-button size="small" @click="doRename(row)">重命名</el-button>
-            <el-button size="small" type="danger" @click="doDelete(row)">删除</el-button>
-          </template>
+        <el-table-column width="52" align="center">
+          <template #default="{ row }"><button class="file-more" aria-label="更多文件操作" title="更多操作（也可右键）" @click.stop="openContext(row, null, $event)"><el-icon><MoreFilled /></el-icon></button></template>
         </el-table-column>
       </el-table>
+      <div class="file-context-hint">右键文件可进行复制、移动、重命名等操作 · 双击打开</div>
+      <FileContextMenu :open="contextOpen" :x="contextPoint.x" :y="contextPoint.y" :title="contextRows.length > 1 ? `已选择 ${contextRows.length} 项` : contextRows[0]?.name || ''" :items="contextItems" @close="contextOpen = false" @select="runContext" />
     </el-main>
 
     <el-dialog
@@ -923,6 +974,10 @@ function openMoreSheet() {
 </template>
 
 <style scoped>
+.file-more { border: 0; background: transparent; color: var(--el-text-color-secondary); width: 30px; height: 30px; border-radius: 7px; cursor: pointer; display: inline-grid; place-items: center; }
+.file-more:hover { background: var(--el-fill-color); }
+.file-context-hint { padding: 12px 4px; color: var(--el-text-color-placeholder); font-size: 11px; }
+:deep(.search-match) { --el-table-tr-bg-color: var(--el-color-primary-light-9); }
 /* ========== Desktop ========== */
 .page { height: 100%; display: flex; flex-direction: column; }
 .header {

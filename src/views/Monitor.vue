@@ -62,9 +62,10 @@ function pctColor(p: number) {
         </svg>
       </div>
       <div class="stat-card">
-        <div class="stat-label">内存</div>
-        <div class="stat-number">{{ m.memPct.value }}<span class="stat-unit">%</span></div>
-        <div class="stat-detail">{{ formatBytes(m.memUsed.value) }} / {{ formatBytes(m.memTotal.value) }}</div>
+        <div class="stat-label">内存（系统）</div>
+        <div class="stat-number">{{ m.memPct.value ?? '—' }}<span v-if="m.memPct.value != null" class="stat-unit">%</span></div>
+        <div class="stat-detail">{{ m.memAvailable.value ? '约 ' + formatBytes(m.memUsed.value) + ' / ' + formatBytes(m.memTotal.value) : '容量未返回' }}</div>
+        <div class="stat-detail">已安装 {{ m.memInstalled.value == null ? '未返回' : formatBytes(m.memInstalled.value) }} · 已用容量为估算</div>
         <svg v-if="m.memHistory.value.length > 1" class="sparkline" viewBox="0 0 120 30" preserveAspectRatio="none">
           <path :d="sparklinePath(m.memHistory.value, 120, 30)" fill="none" stroke="hsl(262 83% 58%)" stroke-width="1.5" />
         </svg>
@@ -136,8 +137,8 @@ function pctColor(p: number) {
         </div>
         <div class="m-stat-card">
           <div class="m-stat-label">内存</div>
-          <div class="m-stat-number">{{ m.memPct.value }}<span class="m-stat-unit">%</span></div>
-          <div class="m-stat-sub">{{ formatBytes(m.memUsed.value) }}</div>
+          <div class="m-stat-number">{{ m.memPct.value ?? '—' }}<span v-if="m.memPct.value != null" class="m-stat-unit">%</span></div>
+          <div class="m-stat-sub">{{ m.memAvailable.value ? '约 ' + formatBytes(m.memUsed.value) : '容量未返回' }}</div>
         </div>
         <div class="m-stat-card">
           <div class="m-stat-label">↑ 上行</div>

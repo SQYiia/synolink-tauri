@@ -1,6 +1,6 @@
 [package]
 name = "synolink-tauri"
-version = "0.1.0"
+version = "0.1.15"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -30,4 +30,5 @@ url = "2"
 percent-encoding = "2"
 tokio = { version = "1", features = ["fs", "io-util", "sync", "rt"] }
 futures-util = "0.3"
+keyring = { version = "3.6.3", features = ["windows-native", "apple-native", "sync-secret-service", "crypto-rust"] }
 

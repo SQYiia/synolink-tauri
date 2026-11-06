@@ -12,6 +12,21 @@ export interface DsmResponse<T = any> {
   error?: { code: number; errors?: any }
 }
 
+export class MediaError extends Error {
+  constructor(message: string, public code?: number) { super(message); this.name = 'MediaError' }
+}
+
+function imageContentType(bytes: Uint8Array): string | null {
+  const text = new TextDecoder('ascii').decode(bytes.slice(0, 12))
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg'
+  if (bytes[0] === 0x89 && text.slice(1, 4) === 'PNG') return 'image/png'
+  if (text.startsWith('GIF87a') || text.startsWith('GIF89a')) return 'image/gif'
+  if (text.startsWith('RIFF') && text.slice(8, 12) === 'WEBP') return 'image/webp'
+  if (text.startsWith('BM')) return 'image/bmp'
+  if (text.slice(4, 8) === 'ftyp' && ['heic', 'heix', 'hevc', 'hevx', 'mif1', 'msf1'].includes(text.slice(8, 12))) return 'image/heic'
+  return null
+}
+
 /** 会话失效（code=119）时由外部提供的自动恢复函数：返回 true 表示重登成功。 */
 let sessionRecoverer: (() => Promise<boolean>) | null = null
 export function setSessionRecoverer(fn: (() => Promise<boolean>) | null) {
@@ -60,12 +75,16 @@ function normalizeDsDestination(p?: string): string | undefined {
 
 export class DsmClient {
   baseUrl: string
+  account = ''
+  allowInsecure = false
+  mediaScope = crypto.randomUUID()
   apiInfo: Record<string, ApiInfo> = {}
   synoToken = ''
   sid = ''
   /** DownloadStation 专用 sid。群晖要求此类 API 必须用 session=DownloadStation 登录，
    *  与 FileStation session 的 sid 不互通。为两者同时可用，我们双登录并按 api 前缀路由。 */
   dsSid = ''
+  driveSid = ''
 
   constructor(baseUrl = '') {
     this.baseUrl = baseUrl.replace(/\/$/, '')
@@ -91,11 +110,15 @@ export class DsmClient {
     } = {},
     _retried = false,
   ): Promise<T> {
+    const requestIdentity = `${this.baseUrl}\n${this.account}`
     const method = opts.method ?? 'GET'
     // 根据调用的 api 选择会话 sid：SYNO.DownloadStation.* 优先用 dsSid，其余用主 sid
     const apiName = (opts.form?.api as string | undefined) ?? (opts.query?.api as string | undefined) ?? ''
-    const useDsSid = apiName.startsWith('SYNO.DownloadStation.') && !!this.dsSid
-    const effectiveSid = useDsSid ? this.dsSid : this.sid
+    const authParams = opts.form ?? opts.query
+    const useDsSid = !!this.dsSid && (apiName.startsWith('SYNO.DownloadStation.') ||
+      (apiName === 'SYNO.API.Auth' && authParams?.method === 'logout' && authParams?.session === 'DownloadStation'))
+    const useDriveSid = !!this.driveSid && (apiName.startsWith('SYNO.SynologyDrive.') || (apiName === 'SYNO.API.Auth' && authParams?.method === 'logout' && authParams?.session === 'SynologyDrive'))
+    const effectiveSid = useDriveSid ? this.driveSid : useDsSid ? this.dsSid : this.sid
     // 注入 _sid（DSM session ID）
     const query = { ...(opts.query ?? {}) }
     const form = opts.form ? { ...opts.form } : undefined
@@ -124,23 +147,27 @@ export class DsmClient {
       method,
       headers,
       body,
-      // 群晖 NAS 常为自签名证书，跳过 TLS 校验
+      connectTimeout: 15000,
+      signal: AbortSignal.timeout(30000),
+      // Only an explicitly configured server may bypass certificate validation.
       danger: {
-        acceptInvalidCerts: true,
-        acceptInvalidHostnames: true,
+        acceptInvalidCerts: this.allowInsecure,
+        acceptInvalidHostnames: this.allowInsecure,
       },
     } as any)
+    if (!res.ok) throw new Error(`服务器响应异常（HTTP ${res.status}）`)
     const text = await res.text()
+    if (requestIdentity !== `${this.baseUrl}\n${this.account}`) throw new Error('连接已切换，已忽略旧请求的结果')
     let parsed: any
     try {
       parsed = JSON.parse(text)
     } catch {
-      return text as any
+      throw new Error('服务器未返回有效数据，请检查地址或反向代理配置')
     }
     // 会话失效（code=119 / 105 / 106 / 107）自动重登并重放一次
     const code = parsed?.error?.code
-    const SESSION_LOST = code === 119 || code === 105 || code === 106 || code === 107
-    if (!_retried && parsed?.success === false && SESSION_LOST && sessionRecoverer) {
+    const SESSION_LOST = code === 119 || code === 106 || code === 107
+    if (this === dsm && !_retried && parsed?.success === false && SESSION_LOST && sessionRecoverer) {
       // 登出登入接口自身不走恢复，避免死循环
       const isAuthCall = (opts.form?.api === 'SYNO.API.Auth') || (opts.query?.api === 'SYNO.API.Auth') || path.endsWith('/auth.cgi')
       if (!isAuthCall) {
@@ -163,6 +190,7 @@ export class DsmClient {
     if (res.success && res.data) {
       this.apiInfo = res.data
     }
+    if (!res.success || !res.data) throw new Error('无法读取服务器 API 信息')
     return this.apiInfo
   }
 
@@ -207,6 +235,7 @@ export class DsmClient {
     device_id?: string
     enable_device_token?: 'yes' | 'no'
   }): Promise<DsmResponse<AuthResult>> {
+    this.dsSid = ''
     const res = await this.entry<AuthResult>('SYNO.API.Auth', 'login', {
       post: true,
       params: {
@@ -221,6 +250,8 @@ export class DsmClient {
       },
     })
     if (res.success && res.data) {
+      if (this.account !== params.account) this.mediaScope = crypto.randomUUID()
+      this.account = params.account
       this.sid = res.data.sid ?? ''
       this.synoToken = res.data.synotoken ?? ''
       // 同步会话给 Rust 端（用于 dsm:// 代理流式播放）
@@ -229,10 +260,22 @@ export class DsmClient {
           baseUrl: this.baseUrl,
           sid: this.sid,
           synoToken: this.synoToken,
+          account: this.account,
+          allowInsecure: this.allowInsecure,
+          mediaScope: this.mediaScope,
         })
-      } catch (e) { console.warn('[dsm] set_session failed:', e) }
+      } catch {
+        this.sid = ''
+        this.account = ''
+        throw new Error('无法初始化本机媒体与传输会话，请重试登录')
+      }
       // 追加 DownloadStation 会话登录（双 sid 策略），同步等待以保证 dsSid 就绪；失败不阻断主登录
       await this.dsLogin(params).catch(() => {})
+      this.driveSid = ''
+      if (this.apiInfo['SYNO.SynologyDrive.Files']) {
+        const drive = await this.entry<AuthResult>('SYNO.API.Auth', 'login', { post: true, params: { ...params, session: 'SynologyDrive', format: 'sid' } }).catch(() => null)
+        this.driveSid = drive?.success ? drive.data?.sid ?? '' : ''
+      }
     }
     return res
   }
@@ -259,14 +302,19 @@ export class DsmClient {
 
   /** 登出（doc 3.2），session 必须与 login 时一致 */
   async logout() {
-    const res = await this.entry('SYNO.API.Auth', 'logout', { params: { session: 'FileStation' } })
-    // 一并登出 DownloadStation session（如果之前登过）
-    if (this.dsSid) {
-      await this.entry('SYNO.API.Auth', 'logout', { params: { session: 'DownloadStation' } }).catch(() => {})
+    try {
+      if (this.driveSid) await this.entry('SYNO.API.Auth', 'logout', { params: { session: 'SynologyDrive' } }).catch(() => {})
+      if (this.dsSid) await this.entry('SYNO.API.Auth', 'logout', { params: { session: 'DownloadStation' } }).catch(() => {})
+      return await this.entry('SYNO.API.Auth', 'logout', { params: { session: 'FileStation' } })
+    } finally {
+      this.driveSid = ''
       this.dsSid = ''
+      this.sid = ''
+      this.synoToken = ''
+      this.account = ''
+      this.mediaScope = crypto.randomUUID()
+      await invoke('clear_session')
     }
-    try { await invoke('clear_session') } catch (e) { console.warn('[dsm] clear_session failed:', e) }
-    return res
   }
 
   /** 共享文件夹列表（doc 4.4 list_share） */
@@ -295,7 +343,68 @@ export class DsmClient {
 
   /** 只列目录（给目录选择器用） */
   async listFolders(folderPath: string) {
-    return this.listFiles(folderPath, { filetype: 'dir', limit: 0 })
+    return this.listAll(folderPath, undefined, 'dir')
+  }
+
+  /** Fetch every page; never silently present a truncated directory. */
+  async listAll(folderPath = '', additional = '["size","time","type","perm"]', filetype: 'all' | 'dir' = 'all'): Promise<DsmResponse> {
+    const key = folderPath ? 'files' : 'shares'
+    const rows: any[] = []
+    const seen = new Set<string>()
+    const baseUrl = this.baseUrl
+    const account = this.account
+    for (let offset = 0;;) {
+      if (this.baseUrl !== baseUrl || this.account !== account) throw new Error('服务器或账号已切换，请重新加载')
+      const res = folderPath
+        ? await this.listFiles(folderPath, { offset, limit: 500, additional, filetype })
+        : await this.listShare({ offset, limit: 500, additional })
+      if (this.baseUrl !== baseUrl || this.account !== account) throw new Error('服务器或账号已切换，请重新加载')
+      if (!res.success) return res
+      const batch: any[] = res.data?.[key] ?? []
+      for (const row of batch) {
+        if (!seen.has(row.path)) { seen.add(row.path); rows.push(row) }
+      }
+      offset += batch.length
+      if (rows.length < offset) throw new Error('目录在加载期间发生变化，请刷新重试')
+      const total = Number(res.data?.total)
+      if (!batch.length || (Number.isFinite(total) && offset >= total)) break
+      if (batch.length < 500 && !Number.isFinite(total)) break
+    }
+    return { success: true, data: { [key]: rows, total: rows.length } }
+  }
+
+  async searchAll(folder: string, pattern: string, signal?: AbortSignal) {
+    const start = await this.searchStart(folder, pattern, true)
+    if (!start.success || !start.data?.taskid) throw new Error('无法启动搜索')
+    const taskid = start.data.taskid
+    const baseUrl = this.baseUrl
+    const account = this.account
+    const deadline = Date.now() + 120000
+    const check = () => {
+      if (signal?.aborted || baseUrl !== this.baseUrl || account !== this.account) throw new Error('搜索已取消')
+      if (Date.now() > deadline) throw new Error('搜索尚未完成，请缩小范围后重试')
+    }
+    try {
+      for (;;) {
+        check()
+        const res = await this.searchList(taskid, { limit: 1 })
+        if (!res.success) throw new Error(`搜索失败（${res.error?.code}）`)
+        if (res.data?.finished) break
+        await new Promise(r => setTimeout(r, 500))
+      }
+      const files: any[] = []
+      for (let offset = 0;;) {
+        check()
+        const res = await this.searchList(taskid, { offset, limit: 500 })
+        if (!res.success) throw new Error(`读取搜索结果失败（${res.error?.code}）`)
+        const batch = res.data?.files ?? []
+        files.push(...batch)
+        offset += batch.length
+        if (batch.length < 500) return files
+      }
+    } finally {
+      if (baseUrl === this.baseUrl && account === this.account) await this.searchStop(taskid).catch(() => {})
+    }
   }
 
   /** 新建文件夹（doc 4.6 create） */
@@ -316,7 +425,7 @@ export class DsmClient {
 
   /** 删除（blocking 模式，doc 4.12 delete） */
   async deletePath(path: string | string[], recursive = true) {
-    const p = Array.isArray(path) ? path.join(',') : path
+    const p = JSON.stringify(Array.isArray(path) ? path : [path])
     return this.entry('SYNO.FileStation.Delete', 'delete', {
       post: true,
       params: { path: p, recursive: recursive ? 'true' : 'false' },
@@ -325,7 +434,7 @@ export class DsmClient {
 
   /** 复制或移动文件/文件夹（doc 4.9 start） */
   async copyMove(paths: string[], destFolder: string, overwrite = false, removeSource = false) {
-    const p = paths.join(',')
+    const p = JSON.stringify(paths)
     return this.entry<{ taskid: string }>('SYNO.FileStation.CopyMove', 'start', {
       post: true,
       params: {
@@ -420,9 +529,9 @@ export class DsmClient {
     const cgi = info?.path ?? 'entry.cgi'
     const params = new URLSearchParams({
       api: 'SYNO.FileStation.Thumb',
-      version: String(info?.maxVersion ?? 2),
+      version: '2',
       method: 'get',
-      path,
+      path: JSON.stringify(path),
       size,
       _sid: this.sid,
     })
@@ -438,17 +547,160 @@ export class DsmClient {
 
   /** 拉取缩略图字节（绕过自签名证书） */
   async thumbBytes(path: string, size: 'small' | 'medium' | 'large' | 'original' = 'small'): Promise<ArrayBuffer> {
-    const url = this.thumbUrl(path, size)
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: this.authHeaders(),
-      danger: { acceptInvalidCerts: true, acceptInvalidHostnames: true },
-    } as any)
-    return await res.arrayBuffer()
+    return (await this.imageBlob('thumb', path, size)).arrayBuffer()
+  }
+
+  /** Load authenticated image bytes through the same native HTTP transport as API requests. */
+  async imageBlob(kind: 'thumb' | 'image', path: string, size: 'small' | 'medium' | 'large' | 'original' = 'small', signal?: AbortSignal, retried = false): Promise<Blob> {
+    const identity = `${this.baseUrl}\n${this.account}`
+    const requestSid = this.sid
+    if (!requestSid) throw new MediaError('请先登录服务器')
+    if (signal?.aborted) throw new DOMException('已取消', 'AbortError')
+    const url = kind === 'thumb' ? this.thumbUrl(path, size) : this.downloadUrl(path)
+    let response: Response
+    try {
+      response = await fetch(url, {
+        headers: { ...this.authHeaders(), 'Cache-Control': 'no-cache' },
+        signal,
+        connectTimeout: 15000,
+        danger: { acceptInvalidCerts: this.allowInsecure, acceptInvalidHostnames: this.allowInsecure },
+      } as any)
+    } catch {
+      if (signal?.aborted) throw new DOMException('已取消', 'AbortError')
+      throw new MediaError('图片连接失败，请检查网络和服务器证书设置')
+    }
+    if (!response.ok) {
+      await response.body?.cancel()
+      const label = kind === 'thumb' ? '缩略图' : '原图'
+      throw new MediaError(response.status === 404
+        ? `${label}未找到（HTTP 404）${kind === 'thumb' ? '，NAS 可能未生成预览' : '，请检查文件是否已移动'}`
+        : `${label}请求失败（HTTP ${response.status}）`)
+    }
+    const limit = (kind === 'thumb' ? 16 : 64) * 1024 * 1024
+    if (Number(response.headers.get('content-length')) > limit) {
+      await response.body?.cancel()
+      throw new MediaError('图片过大，请下载后查看')
+    }
+    const reader = response.body?.getReader()
+    const chunks: Uint8Array[] = []
+    let length = 0
+    if (!reader) throw new MediaError('服务器未返回图片内容')
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        length += value.byteLength
+        if (length > limit) { await reader.cancel(); throw new MediaError('图片过大，请下载后查看') }
+        chunks.push(value)
+      }
+    } finally { reader.releaseLock() }
+    if (signal?.aborted) throw new DOMException('已取消', 'AbortError')
+    if (identity !== `${this.baseUrl}\n${this.account}`) throw new MediaError('连接已切换，请重新打开相册')
+    const body = new Blob(chunks)
+    const prefix = new Uint8Array(await body.slice(0, 65536).arrayBuffer())
+    const mime = imageContentType(prefix)
+    if (mime) return new Blob(chunks, { type: mime })
+    let code: number | undefined
+    try { const result = JSON.parse(new TextDecoder().decode(prefix)); if (result.success === false) code = result.error?.code } catch { /* not a DSM JSON envelope */ }
+    if ([106, 107, 119].includes(code ?? 0) && !retried && this === dsm && sessionRecoverer) {
+      if (this.sid === requestSid) {
+        if (!reloginInflight) reloginInflight = sessionRecoverer().finally(() => { reloginInflight = null })
+        if (!await reloginInflight) throw new MediaError('登录已过期，请重新登录后加载图片', code)
+      }
+      return this.imageBlob(kind, path, size, signal, true)
+    }
+    const messages: Record<number, string> = {
+      105: '当前账号无权读取图片，请检查共享文件夹权限',
+      106: '登录已过期，请重新登录', 107: '会话已中断，请重新登录', 119: '登录已失效，请重新登录',
+      800: '图片文件不存在或已移动', 801: 'NAS 无法生成此文件的缩略图',
+    }
+    throw new MediaError(code ? `${messages[code] ?? 'NAS 拒绝图片请求'}（${code}）` : '服务器返回的内容不是可显示的图片', code)
+  }
+
+  /** Resolve a local media descriptor; never fetch its custom-scheme URL in the WebView. */
+  async cachedMediaImageBlob(source: string): Promise<Blob | null> {
+    try {
+      const descriptor = new URL(source)
+      const path = descriptor.searchParams.get('path') || ''
+      const revision = descriptor.searchParams.get('revision')
+      const scope = this.mediaScope
+      const identity = `${this.baseUrl}\n${this.account}`
+      if (!this.sid || !revision || descriptor.searchParams.get('scope') !== scope) return null
+      const video = /\.(mp4|webm|mov|mkv|avi|ts|m4v|mpg|mpeg|wmv|flv|3gp)$/i.test(path)
+      if (!video && !/\.hei[cf]$/i.test(path)) return null
+      const kind = descriptor.pathname.slice(1), size = descriptor.searchParams.get('size') || 'small'
+      if (video && kind !== 'thumb') return null
+      const dimension = video ? 640 : kind === 'thumb' && size !== 'large' && size !== 'original' ? 512 : 2560
+      const cache = await import('../utils/imageCache')
+      const blob = await cache.readImageCache(cache.imageCacheKey(this.baseUrl, this.account, path, revision, String(dimension)))
+      return scope === this.mediaScope && identity === `${this.baseUrl}\n${this.account}` ? blob : null
+    } catch { return null }
+  }
+
+  async mediaImageBlob(source: string, signal?: AbortSignal): Promise<Blob> {
+    const identity = `${this.baseUrl}\n${this.account}\n${this.mediaScope}`
+    const descriptor = new URL(source)
+    const kind = descriptor.pathname.slice(1)
+    const path = descriptor.searchParams.get('path')
+    if (!path || !['thumb', 'image'].includes(kind) || descriptor.searchParams.get('scope') !== this.mediaScope) {
+      throw new MediaError('图片链接已过期，请重新打开相册')
+    }
+    const size = descriptor.searchParams.get('size') || 'small'
+    if (!['small', 'medium', 'large', 'original'].includes(size)) throw new MediaError('缩略图尺寸无效')
+    const isVideoThumb = kind === 'thumb' && /\.(mp4|webm|mov|mkv|avi|ts|m4v|mpg|mpeg|wmv|flv|3gp)$/i.test(path)
+    const dimension = isVideoThumb ? 640 : kind === 'thumb' && size !== 'large' && size !== 'original' ? 512 : 2560
+    const revision = descriptor.searchParams.get('revision')
+    const cache = (/\.hei[cf]$/i.test(path) || isVideoThumb) && revision ? await import('../utils/imageCache') : null
+    const cacheKey = cache ? cache.imageCacheKey(this.baseUrl, this.account, path, revision!, String(dimension)) : ''
+    if (cache) {
+      const hit = await cache.readImageCache(cacheKey)
+      if (signal?.aborted) throw new DOMException('已取消', 'AbortError')
+      if (identity !== `${this.baseUrl}\n${this.account}\n${this.mediaScope}`) throw new MediaError('连接已切换，请重新打开相册')
+      if (hit) return hit
+    }
+    let blob: Blob
+    const probe = isVideoThumb ? new AbortController() : null
+    const abortProbe = () => probe?.abort()
+    signal?.addEventListener('abort', abortProbe, { once: true })
+    if (signal?.aborted) probe?.abort()
+    const probeTimeout = probe ? setTimeout(() => probe.abort(), 2500) : undefined
+    try {
+      blob = await this.imageBlob(kind as 'thumb' | 'image', path, size as 'small' | 'medium' | 'large' | 'original', probe?.signal ?? signal)
+    } catch (error) {
+      // DSM can return HTTP 404 for HEIC even when the original exists.
+      // Never turn permission/session failures into another download request.
+      if (kind !== 'thumb' || (!/\.hei[cf]$/i.test(path) && !isVideoThumb) || signal?.aborted ||
+          (error instanceof MediaError && [105, 106, 107, 119].includes(error.code ?? 0))) throw error
+      if (isVideoThumb) {
+        try {
+          const { captureVideoFrame } = await import('../utils/videoFrame')
+          blob = await captureVideoFrame(this.mediaUrl('stream', path), signal)
+        } catch {
+          if (signal?.aborted) throw new DOMException('已取消', 'AbortError')
+          throw new MediaError('暂无可用封面，可尝试播放视频')
+        }
+        if (identity !== `${this.baseUrl}\n${this.account}\n${this.mediaScope}`) throw new MediaError('连接已切换，请重新打开视频')
+      } else blob = await this.imageBlob('image', path, 'small', signal)
+    } finally { clearTimeout(probeTimeout); signal?.removeEventListener('abort', abortProbe) }
+    if (blob.type === 'image/heic') {
+      try {
+        const { convertHeic } = await import('../utils/heic')
+        const converted = await convertHeic(blob, dimension, signal)
+        if (identity !== `${this.baseUrl}\n${this.account}\n${this.mediaScope}`) throw new MediaError('连接已切换，请重新打开相册')
+        if (cache) await cache.writeImageCache(cacheKey, converted)
+        return converted
+      } catch (error) {
+        if (signal?.aborted) throw new DOMException('已取消', 'AbortError')
+        if (error instanceof MediaError) throw error
+        throw new MediaError('HEIC 本地转换失败，请下载原图查看')
+      }
+    }
+    if (cache) await cache.writeImageCache(cacheKey, blob)
+    return blob
   }
 
   /** 文件上传 multipart（doc 4.9 upload） */
-  async upload(folderPath: string, file: File, overwrite = true) {
+  async upload(folderPath: string, file: File, overwrite = false) {
     const info = this.apiInfo['SYNO.FileStation.Upload']
     const cgi = info?.path ?? 'entry.cgi'
     const version = info?.maxVersion ?? 2
@@ -468,7 +720,7 @@ export class DsmClient {
       method: 'POST',
       headers,
       body: form,
-      danger: { acceptInvalidCerts: true, acceptInvalidHostnames: true },
+      danger: { acceptInvalidCerts: this.allowInsecure, acceptInvalidHostnames: this.allowInsecure },
     } as any)
     const text = await res.text()
     try {
@@ -479,12 +731,36 @@ export class DsmClient {
   }
 
   /** 获取文件字节（用于预览或本地保存） */
+  async readSidecar(path: string, maxBytes: number): Promise<ArrayBuffer> {
+    const res = await fetch(this.downloadUrl(path, 'open'), {
+      headers: this.authHeaders(), signal: AbortSignal.timeout(15000),
+      danger: { acceptInvalidCerts: this.allowInsecure, acceptInvalidHostnames: this.allowInsecure },
+    } as any)
+    if (!res.ok) throw new Error(`资料读取失败（HTTP ${res.status}）`)
+    if (Number(res.headers.get('content-length')) > maxBytes) throw new Error('资料文件过大')
+    const reader = res.body?.getReader()
+    if (!reader) throw new Error('资料内容为空')
+    const chunks: Uint8Array[] = []; let length = 0
+    try {
+      for (;;) {
+        const { value, done } = await reader.read()
+        if (done) break
+        length += value.length
+        if (length > maxBytes) throw new Error('资料文件过大')
+        chunks.push(value)
+      }
+    } finally { await reader.cancel().catch(() => {}) }
+    const bytes = new Uint8Array(length); let offset = 0
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length }
+    return bytes.buffer
+  }
+
   async downloadBytes(path: string): Promise<ArrayBuffer> {
     const url = this.downloadUrl(path, 'open')
     const res = await fetch(url, {
       method: 'GET',
       headers: this.authHeaders(),
-      danger: { acceptInvalidCerts: true, acceptInvalidHostnames: true },
+      danger: { acceptInvalidCerts: this.allowInsecure, acceptInvalidHostnames: this.allowInsecure },
     } as any)
     return await res.arrayBuffer()
   }
@@ -513,8 +789,8 @@ export class DsmClient {
   }
 
   /** 构造 dsm:// 代理 URL（由 Rust 端转发并绕过自签名证书） */
-  mediaUrl(kind: 'stream' | 'thumb', path: string, extra: Record<string, string> = {}) {
-    const params = new URLSearchParams({ path, ...extra })
+  mediaUrl(kind: 'stream' | 'thumb' | 'image', path: string, extra: Record<string, string> = {}) {
+    const params = new URLSearchParams({ path, scope: this.mediaScope, ...extra })
     return `${DSM_SCHEME_BASE}/${kind}?${params.toString()}`
   }
 
@@ -582,7 +858,7 @@ export class DsmClient {
       method: 'POST',
       headers,
       body: form,
-      danger: { acceptInvalidCerts: true, acceptInvalidHostnames: true },
+      danger: { acceptInvalidCerts: this.allowInsecure, acceptInvalidHostnames: this.allowInsecure },
     } as any)
     const text = await res.text()
     try {
@@ -653,6 +929,89 @@ export class DsmClient {
 
   // ─── VMM (Virtual Machine Manager) ───────────────────────────────
 
+  async driveFiles(path = '/mydrive', offset = 0) {
+    return this.entry('SYNO.SynologyDrive.Files', 'list', { params: { version: 2, path, offset, limit: 100, filter: '{}', sort_by: 'name', sort_direction: 'asc' } })
+  }
+  async driveTeamFolders(offset = 0) {
+    return this.entry('SYNO.SynologyDrive.TeamFolders', 'list', { params: { offset, limit: 100, filter: '{}', sort_by: 'name', sort_direction: 'asc' } })
+  }
+  async hyperBackupTasks() {
+    return this.entry('SYNO.Backup.Task', 'list', { params: { version: 1, additional: JSON.stringify(['last_bkp_time', 'last_bkp_result']) } })
+  }
+  async hyperBackupStatus(taskId: string) {
+    return this.entry('SYNO.Backup.Task', 'status', { params: { version: 1, task_id: taskId, blOnline: false, additional: JSON.stringify(['last_bkp_time', 'next_bkp_time', 'last_bkp_result', 'last_bkp_progress']) } })
+  }
+  async activeBackupTasks() {
+    return this.entry('SYNO.ActiveBackup.Task', 'list', { params: { version: 1, load_status: true, load_result: true, load_devices: false, load_versions: false, filter: '{}' } })
+  }
+
+  async packageList() {
+    return this.entry('SYNO.Core.Package', 'list', { params: { additional: JSON.stringify(['status', 'description', 'maintainer', 'distributor', 'dependent_packages', 'startable', 'available_operation', 'autoupdate', 'installing_progress', 'is_uninstall_pages']), ignore_hidden: false } })
+  }
+
+  async packageControl(id: string, action: 'start' | 'stop') {
+    if (!id || !['start','stop'].includes(action)) throw new Error('无效的套件操作')
+    return this.entry('SYNO.Core.Package.Control', action, {post:true,params:{version:1,id}})
+  }
+  async packageCatalog(community=false) { return this.entry('SYNO.Core.Package.Server','list',{params:{version:2,blforcereload:true,blloadothers:community}}) }
+  async packageFeeds() { return this.entry('SYNO.Core.Package.Feed','list',{params:{version:1}}) }
+  async packageFeedSave(name:string, feed:string, original?:string) {
+    const url=new URL(feed)
+    if(!name.trim()||!['http:','https:'].includes(url.protocol)||url.username||url.password)throw new Error('请输入套件源名称和有效的 HTTP/HTTPS 地址')
+    return this.entry('SYNO.Core.Package.Feed',original?'set':'add',{post:true,params:{version:1,list:JSON.stringify({name:name.trim(),feed,...(original?{orifeed:original}:{})})}})
+  }
+  async packageFeedDelete(feed:string) { return this.entry('SYNO.Core.Package.Feed','delete',{post:true,params:{version:1,list:JSON.stringify([feed])}}) }
+  async packageFeasibility(id:string,type:'install'|'start'|'stop'|'uninstall') { return this.entry('SYNO.Core.Package','feasibility_check',{post:true,params:{version:1,type:type+'_check',packages:JSON.stringify([id])}}) }
+  async packageSettings() { return this.entry('SYNO.Core.Package.Setting','get',{params:{version:1}}) }
+  async packageAutoUpdate(mode:'disabled'|'important'|'all') {
+    if(!['disabled','important','all'].includes(mode))throw new Error('无效的更新策略')
+    return this.entry('SYNO.Core.Package.Setting','set',{post:true,params:{version:1,enable_autoupdate:mode!=='disabled',autoupdateall:mode==='all',autoupdateimportant:mode==='important'}})
+  }
+  async packageDownload(pkg: {id:string;link:string;md5:string;size:string|number}) {
+    const url = new URL(pkg.link)
+    if (!['https:','http:'].includes(url.protocol) || !pkg.id || !pkg.md5 || !Number.isFinite(Number(pkg.size)) || Number(pkg.size)<=0) throw new Error('套件下载信息不完整')
+    return this.entry('SYNO.Core.Package.Installation','install',{post:true,params:{version:1,operation:'install',type:0,blqinst:false,url:pkg.link,name:pkg.id,checksum:pkg.md5,filesize:pkg.size}})
+  }
+  async packageDownloadStatus(task: string) { return this.entry('SYNO.Core.Package.Installation','status',{params:{version:1,task_id:task}}) }
+  async packageDownloadedInfo(task: string) { return this.entry('SYNO.Core.Package.Installation.Download','check',{params:{version:1,taskid:task}}) }
+  async packageCheck(info:any) { return this.entry('SYNO.Core.Package.Installation','check',{post:true,params:{version:1,id:info.id,install_type:info.install_type || info.additional?.install_type || '',install_on_cold_storage:false,blCheckDep:true,replacepkgs:'{}'}}) }
+  async packageInstall(info:any, volume:string, task:string, upgrade:boolean) {
+    if (!info.id || !task || (!upgrade && !volume)) throw new Error('安装信息不完整，请重新准备套件')
+    return this.entry('SYNO.Core.Package.Installation',upgrade?'upgrade':'install',{post:true,params:{version:1,type:0,check_codesign:true,force:false,installrunpackage:true,extra_values:'{}',...(info.filename?{path:info.filename}:{task_id:task}),...(!upgrade?{volume_path:volume}:{})}})
+  }
+  async packageUninstall(id:string) {
+    if (!id) throw new Error('套件标识为空')
+    return this.entry('SYNO.Core.Package.Uninstallation','uninstall',{post:true,params:{version:1,id,dsm_apps:''}})
+  }
+  async packageUpload(file:File) {
+    if (!/\.spk$/i.test(file.name) || !file.size || file.size>512*1024*1024) throw new Error('请选择不超过 512 MB 的 SPK 文件')
+    const info=this.apiInfo['SYNO.Core.Package.Installation'];if(!info)throw new Error('当前 NAS 不支持安装接口')
+    const identity=this.baseUrl+'\n'+this.account
+    const url=this.buildUrl('/webapi/'+info.path,{api:'SYNO.Core.Package.Installation',version:1,method:'upload',_sid:this.sid})
+    const body=new FormData();body.append('additional',JSON.stringify(['description','maintainer','status','install_type','install_reboot','break_pkgs','replace_pkgs']));body.append('file',file)
+    const response=await fetch(url,{method:'POST',headers:this.authHeaders(),body,signal:AbortSignal.timeout(180000),danger:{acceptInvalidCerts:this.allowInsecure,acceptInvalidHostnames:this.allowInsecure}} as any)
+    if(identity!==this.baseUrl+'\n'+this.account)throw new Error('账号已切换')
+    if(!response.ok)throw new Error('上传失败（HTTP '+response.status+'）')
+    return response.json() as Promise<DsmResponse>
+  }
+  async containerList() {
+    return this.entry('SYNO.Docker.Container', 'list', { params: { type: 'all', offset: 0, limit: -1 } })
+  }
+  async containerResources() { return this.entry('SYNO.Docker.Container.Resource', 'get') }
+  async containerAction(name: string, action: 'start' | 'stop' | 'restart') {
+    if (!['start', 'stop', 'restart'].includes(action) || !name) throw new Error('无效的容器操作')
+    return this.entry('SYNO.Docker.Container', action, { post: true, params: { name } })
+  }
+  async containerLogs(name: string, offset = 0) {
+    return this.entry('SYNO.Docker.Container.Log', 'get', { post: true, params: { name, offset, limit: 200, sort_dir: 'DESC' } })
+  }
+  async dsConfig() { return this.entry('SYNO.DownloadStation.Info', 'getconfig') }
+  async dsSetConfig(params: Record<string, string | number>) {
+    const allowed = ['bt_max_download', 'bt_max_upload', 'http_max_download', 'ftp_max_download', 'default_destination']
+    if (Object.keys(params).some(key => !allowed.includes(key))) throw new Error('不支持的下载设置')
+    return this.entry('SYNO.DownloadStation.Info', 'setserverconfig', { post: true, params })
+  }
+
   /** 列出主机 */
   async vmmHostList() {
     return this.entry('SYNO.Virtualization.API.Host', 'list')
@@ -670,6 +1029,10 @@ export class DsmClient {
     return this.entry('SYNO.Virtualization.API.Guest', 'get', {
       params: { ...opts, additional: true },
     })
+  }
+
+  async vmmGuestSet(guestId: string, settings: { new_guest_name?: string; description?: string; autorun?: number; vcpu_num?: number; vram_size?: number }) {
+    return this.entry('SYNO.Virtualization.API.Guest', 'set', { params: { guest_id: guestId, ...settings } })
   }
 
   /** 虚拟机开机 */

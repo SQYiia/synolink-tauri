@@ -1,28 +1,49 @@
 <script setup lang="ts">
-import { reactive, ref, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { reactive, ref, computed, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useAppStore } from '../stores/app'
 import { DsmClient } from '../api/dsm'
 import { useIsMobile } from '../composables/useIsMobile'
-import { toast } from '../utils/feedback'
+import { toast, confirm } from '../utils/feedback'
 
 const router = useRouter()
+const route = useRoute()
+const editId = typeof route.query.edit === 'string' ? route.query.edit : ''
 const app = useAppStore()
 const isMobile = useIsMobile()
 
 const form = reactive({
   name: '',
-  protocol: 'http' as 'http' | 'https',
+  protocol: 'https' as 'http' | 'https',
   host: '',
-  port: 5000,
+  port: 5001,
+  allowInsecure: false,
   remark: '',
 })
 
+onMounted(async () => {
+  await app.load()
+  const existing = app.servers.find(s => s.id === editId)
+  if (existing) Object.assign(form, existing, { allowInsecure: !!existing.allowInsecure })
+})
 const loading = ref(false)
 
 const baseUrl = computed(() => `${form.protocol}://${form.host}:${form.port}`)
 
 async function submit() {
+  form.host = form.host.trim()
+  try {
+    if (/^https?:\/\//i.test(form.host)) {
+      const url = new URL(form.host)
+      if (url.username || url.password || (url.pathname !== '/' && url.pathname !== '') || url.search || url.hash) throw new Error('请输入服务器根地址，不含路径、账号或查询参数')
+      form.protocol = url.protocol === 'https:' ? 'https' : 'http'
+      form.host = url.hostname
+      form.port = Number(url.port || (form.protocol === 'https' ? 443 : 80))
+    }
+    if (!form.host || /[\s/?#@]/.test(form.host) || !Number.isInteger(Number(form.port)) || form.port < 1 || form.port > 65535) throw new Error('请检查主机地址和端口（1–65535）')
+    new URL(baseUrl.value)
+  } catch (e: any) { toast(e.message || '地址无效', 'warning'); return }
+  if (form.protocol === 'http' && !await confirm('HTTP 会明文传输账号密码，建议改用 HTTPS。仍要保存此连接吗？', '连接安全', { danger: true })) return
   if (!form.host) {
     toast('请输入 IP / 域名', 'warning')
     return
@@ -30,15 +51,20 @@ async function submit() {
   loading.value = true
   try {
     const probe = new DsmClient(baseUrl.value)
+    probe.allowInsecure = form.allowInsecure
     const info = await probe.loadApiInfo()
     if (!info['SYNO.API.Auth']) throw new Error('未返回有效 API 信息')
-    const server = await app.addServer({
+    const config = {
       name: form.name || form.host,
       protocol: form.protocol,
       host: form.host,
       port: Number(form.port),
       remark: form.remark,
-    })
+      allowInsecure: form.allowInsecure,
+    }
+    let server = app.servers.find(s => s.id === editId)
+    if (server) { Object.assign(server, config); await app.saveServers() }
+    else server = await app.addServer(config)
     toast('服务器已保存', 'success')
     router.replace(`/login/${server.id}`)
   } catch (e: any) {
@@ -60,7 +86,7 @@ function onProtocolChange(v: string | number | boolean | undefined) {
 
 <template>
   <!-- 桌面端 -->
-  <div v-if="!isMobile" class="page">
+  <div v-if="!isMobile" class="page ui-add-server">
     <div class="form-wrapper">
       <el-button class="back-btn" @click="back" circle>
         <el-icon><ArrowLeft /></el-icon>
@@ -70,7 +96,7 @@ function onProtocolChange(v: string | number | boolean | undefined) {
         <div class="card-avatar">
           <el-icon :size="28"><Plus /></el-icon>
         </div>
-        <h2 class="card-title">添加服务器</h2>
+        <h2 class="card-title">{{ editId ? '编辑服务器' : '添加服务器' }}</h2>
         <p class="card-sub">输入群晖 NAS 的连接信息</p>
 
         <el-form label-position="top" style="margin-top: 24px; width: 100%;">
@@ -88,6 +114,9 @@ function onProtocolChange(v: string | number | boolean | undefined) {
           </el-form-item>
           <el-form-item label="端口">
             <el-input-number v-model="form.port" :min="1" :max="65535" size="large" style="width: 100%" />
+          </el-form-item>
+          <el-form-item v-if="form.protocol === 'https'" label="证书">
+            <el-checkbox v-model="form.allowInsecure">仅对此服务器允许无效证书（降低安全性）</el-checkbox>
           </el-form-item>
           <el-form-item label="备注">
             <el-input v-model="form.remark" type="textarea" :rows="2" placeholder="可选备注信息" />
@@ -131,6 +160,9 @@ function onProtocolChange(v: string | number | boolean | undefined) {
         label="端口"
         placeholder="5000"
       />
+      <van-cell v-if="form.protocol === 'https'" title="允许无效证书" label="仅对此服务器生效；会降低安全性">
+        <template #value><van-switch v-model="form.allowInsecure" size="20" /></template>
+      </van-cell>
       <van-field
         v-model="form.remark"
         label="备注"

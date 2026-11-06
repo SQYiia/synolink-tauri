@@ -1,0 +1,8 @@
+HEIC preview uses the unmodified heic-to 1.6.7 CSP build (LGPL-3.0-or-later),
+which embeds libheif 1.23.7 and libde265. The decoder is loaded as a separate
+JavaScript chunk and runs locally; no photos are sent to an external service.
+
+heic-to source and build instructions: https://github.com/hoppergee/heic-to/tree/v1.6.7
+libheif source: https://github.com/strukturag/libheif/tree/v1.23.7
+libde265 source: https://github.com/strukturag/libde265
+License text: heic-to-LICENSE.txt (in this directory).

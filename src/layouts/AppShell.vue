@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onMounted, ref, computed } from 'vue'
+import { onMounted, onUnmounted, watch, ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { dsm, setSessionRecoverer } from '../api/dsm'
 import { useAppStore } from '../stores/app'
-import { downloadQueue, cancelTask, removeTask, clearCompleted, downloadDir, revealSavedFile, chooseDownloadDir, resetDownloadDir, askEveryDownload, setAskEveryDownload, localPickerOpen, resolveLocalPicker } from '../composables/useDownloadQueue'
+import { downloadQueue, retryTask, cancelTask, removeTask, clearCompleted, downloadDir, revealSavedFile, chooseDownloadDir, resetDownloadDir, askEveryDownload, setAskEveryDownload, localPickerOpen, resolveLocalPicker } from '../composables/useDownloadQueue'
+import FileOperations from '../components/FileOperations.vue'
 import LocalFolderPicker from '../components/LocalFolderPicker.vue'
 import { formatBytes } from '../utils/format'
 import { useIsMobile } from '../composables/useIsMobile'
@@ -22,37 +23,25 @@ const globalSearchOpen = ref(false)
 const globalSearchQuery = ref('')
 const globalSearchResults = ref<any[]>([])
 const globalSearching = ref(false)
+let globalSearchController: AbortController | null = null
+watch(globalSearchOpen, open => { if (!open) globalSearchController?.abort() })
+onUnmounted(() => { globalSearchController?.abort(); setSessionRecoverer(null) })
 const downloadDrawerOpen = ref(false)
 
 async function doGlobalSearch() {
   if (!globalSearchQuery.value.trim()) return
+  globalSearchController?.abort()
+  const controller = new AbortController()
+  globalSearchController = controller
   globalSearching.value = true
   globalSearchResults.value = []
   try {
-    const start = await dsm.searchStart('/', globalSearchQuery.value, true)
-    if (!start.success || !start.data?.taskid) {
-      ElMessage.error('搜索失败')
-      return
-    }
-    const taskid = start.data.taskid
-    const MAX_WAIT = 15000
-    const POLL = 500
-    const t0 = Date.now()
-    let results: any[] = []
-    while (Date.now() - t0 < MAX_WAIT) {
-      await new Promise((r) => setTimeout(r, POLL))
-      const list = await dsm.searchList(taskid, { limit: 200 })
-      if (list.success) {
-        const data = list.data as any
-        results = data?.files ?? []
-        if (data?.finished) break
-      }
-    }
-    await dsm.searchStop(taskid).catch(() => {})
-    globalSearchResults.value = results
-    if (!results.length) ElMessage.info('未找到匹配文件')
+    globalSearchResults.value = await dsm.searchAll('/', globalSearchQuery.value, controller.signal)
+    if (!globalSearchResults.value.length) ElMessage.info('未找到匹配文件')
+  } catch (e: any) {
+    if (!controller.signal.aborted) ElMessage.error(e.message ?? '搜索失败，请重试')
   } finally {
-    globalSearching.value = false
+    if (globalSearchController === controller) globalSearching.value = false
   }
 }
 
@@ -60,15 +49,16 @@ function goToResult(item: any) {
   globalSearchOpen.value = false
   const filePath = item.path as string
   const folder = filePath.substring(0, filePath.lastIndexOf('/')) || '/'
-  router.push({ path: '/app/files', query: { open: folder } })
+  router.push({ path: '/app/files', query: { open: item.isdir ? filePath : folder, selected: filePath } })
 }
 
 /** 根据当前保存的账户 重建 DSM 会话；返回是否成功。 */
 async function reloginFromStore(): Promise<boolean> {
   const acc = app.accounts.find(a => a.id === app.currentAccountId)
   const srv = app.servers.find(s => s.id === app.currentServerId)
-  if (!acc || !srv) return false
+  if (!acc || !srv || !acc.password) return false
   dsm.baseUrl = `${srv.protocol}://${srv.host}:${srv.port}`
+  dsm.allowInsecure = !!srv.allowInsecure
   try {
     if (!Object.keys(dsm.apiInfo).length) {
       await dsm.loadApiInfo()
@@ -82,7 +72,14 @@ async function reloginFromStore(): Promise<boolean> {
 
 onMounted(async () => {
   await app.load()
-  setSessionRecoverer(reloginFromStore)
+  setSessionRecoverer(async () => {
+    const ok = await reloginFromStore()
+    if (!ok) {
+      ElMessage.warning('需要重新登录或完成两步验证')
+      await router.replace(`/login/${app.currentServerId}`)
+    }
+    return ok
+  })
 
   if (!dsm.sid) {
     if (!app.currentAccountId || !app.currentServerId) {
@@ -101,10 +98,11 @@ onMounted(async () => {
 })
 
 const desktopTabs = [
+  { to: '/app/applications', label: '应用中心', icon: 'Grid' },
   { to: '/app/files', label: '文件', icon: 'Folder' },
   { to: '/app/album', label: '相册', icon: 'Picture' },
   { to: '/app/videos', label: '视频', icon: 'VideoCamera' },
-  { to: '/app/downloads', label: '下载站', icon: 'Connection' },
+  { to: '/app/downloads', label: 'NAS 下载站', icon: 'Connection' },
   { to: '/app/monitor', label: '性能', icon: 'Odometer' },
   { to: '/app/vmm', label: '虚拟机', icon: 'Monitor' },
   { to: '/app/me', label: '设置', icon: 'User' },
@@ -156,6 +154,7 @@ function onTabChange(i: number) {
   <!-- ========== 桌面端 ========== -->
   <div v-if="!isMobile" class="app-shell">
     <aside class="sidebar">
+      <RouterLink class="sidebar-brand" to="/app/dashboard" aria-label="SynoLink 首页"><span class="brand-mark">S</span><strong>SynoLink</strong></RouterLink>
       <div class="sidebar-nav">
         <RouterLink
           v-for="t in desktopTabs"
@@ -187,11 +186,9 @@ function onTabChange(i: number) {
         <span>正在恢复会话…</span>
       </div>
       <RouterView v-else v-slot="{ Component }">
-        <Transition name="page-fade" mode="out-in">
-          <keep-alive :max="3">
-            <component :is="Component" :key="$route.path" />
-          </keep-alive>
-        </Transition>
+        <keep-alive :max="3">
+          <component :is="Component" :key="$route.path" />
+        </keep-alive>
       </RouterView>
     </main>
 
@@ -226,7 +223,7 @@ function onTabChange(i: number) {
     </el-dialog>
 
     <!-- 下载队列 -->
-    <el-drawer v-model="downloadDrawerOpen" title="下载队列" direction="rtl" size="360px">
+    <el-drawer v-model="downloadDrawerOpen" title="传输中心" direction="rtl" size="360px">
       <div class="dl-savedir">
         <div class="dl-savedir-label">保存位置</div>
         <div class="dl-savedir-path" :title="downloadDir">{{ downloadDir || '默认 Downloads' }}</div>
@@ -253,7 +250,7 @@ function onTabChange(i: number) {
         <div class="dl-info">
           <div class="dl-name">{{ t.name }}</div>
           <div class="dl-meta">
-            <span v-if="t.status === 'downloading'">{{ formatBytes(t.loaded) }} / {{ t.size ? formatBytes(t.size) : '未知' }}</span>
+            <span v-if="t.status === 'downloading'">{{ formatBytes(t.loaded) }} / {{ t.size ? formatBytes(t.size) : '未知' }} · {{ formatBytes(t.speed || 0) }}/s<span v-if="t.speed && t.size > t.loaded"> · 剩余约 {{ Math.ceil((t.size - t.loaded) / t.speed) }} 秒</span></span>
             <span v-else-if="t.status === 'done'">已完成</span>
             <span v-else-if="t.status === 'error'" class="dl-error">失败: {{ t.error }}</span>
             <span v-else-if="t.status === 'cancelled'">已取消</span>
@@ -272,10 +269,12 @@ function onTabChange(i: number) {
           <el-button v-if="t.status === 'downloading' || t.status === 'queued'" size="small" type="warning" @click="cancelTask(t.id)">取消</el-button>
           <template v-else>
             <el-button v-if="t.status === 'done' && t.savePath" size="small" type="primary" link @click="revealSavedFile(t.savePath)">打开</el-button>
+            <el-button v-if="t.status === 'error' || t.status === 'cancelled'" size="small" @click="retryTask(t.id)">继续 / 重试</el-button>
             <el-button size="small" @click="removeTask(t.id)">移除</el-button>
           </template>
         </div>
       </div>
+      <FileOperations />
     </el-drawer>
   </div>
 
@@ -360,6 +359,7 @@ function onTabChange(i: number) {
           @click="goToResult(r)"
         />
       </van-cell-group>
+      <FileOperations />
     </van-popup>
 
     <!-- 下载队列 popup -->
@@ -411,6 +411,7 @@ function onTabChange(i: number) {
             <van-button v-if="t.status === 'downloading' || t.status === 'queued'" size="mini" type="warning" @click="cancelTask(t.id)">取消</van-button>
             <template v-else>
               <van-button v-if="t.status === 'done' && t.savePath" size="mini" type="primary" plain @click="revealSavedFile(t.savePath)">打开</van-button>
+              <van-button v-if="t.status === 'error' || t.status === 'cancelled'" size="mini" plain @click="retryTask(t.id)">继续 / 重试</van-button>
               <van-button size="mini" plain @click="removeTask(t.id)">移除</van-button>
             </template>
           </template>

@@ -11,6 +11,10 @@ const routes = [
     children: [
       { path: '', redirect: '/app/dashboard' },
       { path: 'dashboard', component: () => import('../views/Dashboard.vue'), meta: { title: '首页', tab: true } },
+      { path: 'drive', component: () => import('../views/Drive.vue'), meta: { title: 'Drive 文件' } },
+      { path: 'backups', component: () => import('../views/Backups.vue'), meta: { title: '备份中心' } },
+      { path: 'applications', component: () => import('../views/Applications.vue'), meta: { title: '应用中心', tab: true } },
+      { path: 'containers', component: () => import('../views/Containers.vue'), meta: { title: '容器管理' } },
       { path: 'files', component: () => import('../views/Files.vue'), meta: { title: '文件', tab: true } },
       { path: 'album', component: () => import('../views/Album.vue'), meta: { title: '相册', tab: true } },
       { path: 'videos', component: () => import('../views/Videos.vue'), meta: { title: '视频' } },

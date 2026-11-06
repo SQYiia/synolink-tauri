@@ -13,6 +13,8 @@ const app = useAppStore()
 const isMobile = useIsMobile()
 
 const status = ref<Record<string, 'unknown' | 'online' | 'offline'>>({})
+const lastSeen = ref<Record<string, string>>({})
+const statusLabels = { unknown: '检测中', online: '在线', offline: '连接失败' }
 
 onMounted(async () => {
   await app.load()
@@ -20,10 +22,10 @@ onMounted(async () => {
 })
 
 async function checkAll() {
-  for (const s of app.servers) {
+  await Promise.all(app.servers.map(async s => {
     status.value[s.id] = 'unknown'
-    checkServer(s)
-  }
+    await checkServer(s)
+  }))
 }
 
 const refreshing = ref(false)
@@ -38,21 +40,24 @@ async function onPullRefresh() {
 }
 
 async function checkServer(s: ServerConfig) {
-  const url = `${s.protocol}://${s.host}:${s.port}/webapi/query.cgi?api=SYNO.API.Info&version=1&method=query`
+  const url = `${s.protocol}://${s.host}:${s.port}/webapi/query.cgi?api=SYNO.API.Info&version=1&method=query&query=SYNO.API.Auth`
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 5000)
   try {
-    const ctrl = new AbortController()
-    const timer = setTimeout(() => ctrl.abort(), 5000)
     const resp = await fetch(url, {
       signal: ctrl.signal,
-      danger: { acceptInvalidCerts: true, acceptInvalidHostnames: true },
+      danger: { acceptInvalidCerts: !!s.allowInsecure, acceptInvalidHostnames: !!s.allowInsecure },
     } as any)
     clearTimeout(timer)
-    status.value[s.id] = resp.ok ? 'online' : 'offline'
-    if (resp.ok) markNetworkSuccess()
+    const data = await resp.json()
+    const online = resp.ok && data.success && !!data.data?.['SYNO.API.Auth']
+    status.value[s.id] = online ? 'online' : 'offline'
+    if (online) lastSeen.value[s.id] = new Date().toLocaleTimeString()
+    if (resp.ok && data.success) markNetworkSuccess()
   } catch {
     status.value[s.id] = 'offline'
     markNetworkFailure()
-  }
+  } finally { clearTimeout(timer) }
 }
 
 const list = computed(() => app.servers)
@@ -73,7 +78,7 @@ async function remove(id: string) {
 
 <template>
   <!-- 桌面端 -->
-  <div v-if="!isMobile" class="page">
+  <div v-if="!isMobile" class="page ui-servers">
     <header class="hero">
       <div class="hero-text">
         <h1>SynoLink</h1>
@@ -106,9 +111,11 @@ async function remove(id: string) {
         <div class="card-info">
           <div class="card-name">{{ s.name || s.host }}</div>
           <div class="card-url">{{ s.protocol }}://{{ s.host }}:{{ s.port }}</div>
+          <div class="card-remark">{{ statusLabels[status[s.id] || 'unknown'] }}<span v-if="lastSeen[s.id]"> · 最近连接 {{ lastSeen[s.id] }}</span></div>
           <div class="card-remark" v-if="s.remark">{{ s.remark }}</div>
         </div>
         <div class="card-actions">
+          <el-button size="small" @click.stop="router.push({ path: '/add-server', query: { edit: s.id } })">编辑</el-button>
           <el-button type="primary" size="small" @click.stop="pick(s.id)">连接</el-button>
           <el-button size="small" circle @click.stop="remove(s.id)">
             <el-icon><Delete /></el-icon>
@@ -147,7 +154,7 @@ async function remove(id: string) {
           </div>
           <div class="m-srv-info">
             <div class="m-srv-name">{{ s.name || s.host }}</div>
-            <div class="m-srv-url">{{ s.protocol }}://{{ s.host }}:{{ s.port }}</div>
+            <div class="m-srv-url">{{ s.protocol }}://{{ s.host }}:{{ s.port }} · {{ statusLabels[status[s.id] || 'unknown'] }}</div>
             <div v-if="s.remark" class="m-srv-remark">{{ s.remark }}</div>
           </div>
           <van-icon name="arrow" size="14" color="#c0c4cc" class="m-srv-arrow" />

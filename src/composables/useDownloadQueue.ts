@@ -1,4 +1,4 @@
-import { reactive, computed, ref } from 'vue'
+import { reactive, computed, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
@@ -6,14 +6,18 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { ElMessage, ElNotification } from 'element-plus'
 import { showToast } from 'vant'
 import { h } from 'vue'
+import { dsm } from '../api/dsm'
 import { isIOS } from '../utils/platform'
 
 export interface DownloadTask {
   id: string
+  sourceUrl: string
+  sourceAccount: string
   path: string
   name: string
   size: number
   loaded: number
+  speed?: number
   status: 'queued' | 'downloading' | 'done' | 'error' | 'cancelled'
   error?: string
   savePath?: string
@@ -23,9 +27,20 @@ export interface DownloadTask {
 
 const MAX_CONCURRENT = 2
 
+function loadTasks(): DownloadTask[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem('synolink.transfers') || '[]')
+    if (!Array.isArray(saved)) return []
+    return saved.filter(t => t.sourceUrl && t.sourceAccount).map(t => ({ ...t, loaded: t.loaded ?? 0, status: t.status === 'downloading' || t.status === 'queued' ? 'cancelled' : t.status }))
+  } catch { return [] }
+}
 const state = reactive({
-  tasks: [] as DownloadTask[],
+  tasks: loadTasks(),
 })
+
+watch(() => state.tasks.map(({ loaded, ...task }) => task), tasks => {
+  try { localStorage.setItem('synolink.transfers', JSON.stringify(tasks)) } catch { /* storage full */ }
+}, { deep: true })
 
 export const downloadQueue = computed(() => state.tasks)
 
@@ -136,10 +151,15 @@ interface ErrorPayload { taskId: string; error: string }
 /** 全局事件监听只装一次 */
 let listenersReady: Promise<void> | null = null
 const unlistens: UnlistenFn[] = []
+const progressSamples = new Map<string, { at: number; loaded: number }>()
 
 function ensureListeners(): Promise<void> {
   if (listenersReady) return listenersReady
-  listenersReady = doSetupListeners()
+  listenersReady = doSetupListeners().catch(error => {
+    for (const unlisten of unlistens.splice(0)) unlisten()
+    listenersReady = null
+    throw error
+  })
   return listenersReady
 }
 
@@ -148,6 +168,10 @@ async function doSetupListeners() {
     await listen<ProgressPayload>('download:progress', (e) => {
       const t = state.tasks.find(x => x.id === e.payload.taskId)
       if (!t) return
+      const now = Date.now()
+      const previous = progressSamples.get(t.id)
+      if (previous && now > previous.at) t.speed = Math.max(0, (e.payload.loaded - previous.loaded) * 1000 / (now - previous.at))
+      progressSamples.set(t.id, { at: now, loaded: e.payload.loaded })
       t.loaded = e.payload.loaded
       if (e.payload.total > 0) t.size = e.payload.total
     }),
@@ -194,32 +218,18 @@ async function doSetupListeners() {
 
 export async function enqueue(path: string, name: string, size: number = 0, saveDir?: string) {
   await ensureListeners()
+  const sourceUrl = dsm.baseUrl
+  const sourceAccount = dsm.account
   // 优先级：显式传入的 saveDir > "每次询问"弹选 > 全局 downloadDir > 系统默认
   let effectiveDir: string | undefined = saveDir?.trim() || undefined
   if (!effectiveDir && askEveryDownload.value) {
-    try {
-      const picked = await openDialog({
-        directory: true,
-        multiple: false,
-        defaultPath: downloadDir.value || undefined,
-        title: `选择 「${name}」 的保存目录`,
-      })
-      if (!picked || Array.isArray(picked)) {
-        ElMessage.info('已取消下载')
-        return null
-      }
-      effectiveDir = picked
-      // 同时更新全局默认，下次默选该目录
-      downloadDir.value = picked
-      localStorage.setItem(LS_KEY_SAVE_DIR, picked)
-    } catch (e: any) {
-      ElMessage.error('选择目录失败：' + (e?.message ?? e))
-      return null
-    }
+    const picked = await chooseDownloadDir()
+    if (!picked) return null
+    effectiveDir = picked
   }
   if (!effectiveDir) effectiveDir = await ensureDownloadDir()
-  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  const task: DownloadTask = { id, path, name, size, loaded: 0, status: 'queued', saveDir: effectiveDir }
+  const id = crypto.randomUUID()
+  const task: DownloadTask = { id, sourceUrl, sourceAccount, path, name, size, loaded: 0, status: 'queued', saveDir: effectiveDir }
   state.tasks.unshift(task)
   if (isIOS) {
     showToast({ message: `已加入下载队列：${name}`, duration: 1800 })
@@ -245,13 +255,26 @@ export function cancelTask(id: string) {
   }
 }
 
+export async function retryTask(id: string) {
+  const task = state.tasks.find(t => t.id === id)
+  if (!task || task.status === 'downloading' || task.status === 'queued') return
+  if (task.sourceUrl !== dsm.baseUrl || task.sourceAccount !== dsm.account || !dsm.sid) {
+    ElMessage.warning('请先登录该任务所属的服务器和账号')
+    return
+  }
+  await ensureListeners()
+  task.status = 'queued'
+  task.error = undefined
+  processQueue()
+}
+
 export function removeTask(id: string) {
   const idx = state.tasks.findIndex(t => t.id === id)
   if (idx >= 0) state.tasks.splice(idx, 1)
 }
 
 export function clearCompleted() {
-  const remaining = state.tasks.filter(t => t.status === 'downloading' || t.status === 'queued')
+  const remaining = state.tasks.filter(t => t.status !== 'done')
   state.tasks.splice(0, state.tasks.length, ...remaining)
 }
 
@@ -261,18 +284,22 @@ function activeCount() {
 
 function processQueue() {
   while (activeCount() < MAX_CONCURRENT) {
-    const next = state.tasks.find(t => t.status === 'queued')
+    const next = [...state.tasks].reverse().find(t => t.status === 'queued')
     if (!next) break
     startDownload(next)
   }
 }
 
 async function startDownload(task: DownloadTask) {
+  progressSamples.delete(task.id)
+  task.speed = 0
   task.status = 'downloading'
   task.error = undefined
   invoke('download_to_file', {
     taskId: task.id,
     path: task.path,
+    sourceUrl: task.sourceUrl,
+    sourceAccount: task.sourceAccount,
     name: task.name,
     saveDir: task.saveDir || downloadDir.value || null,
   }).catch((e: any) => {

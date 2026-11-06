@@ -8,6 +8,8 @@ import Vant from 'vant'
 import 'vant/lib/index.css'
 
 import {
+  Grid,
+  Box,
   ArrowLeft,
   ArrowRight,
   Calendar,
@@ -48,6 +50,8 @@ app.use(Vant)
 
 // 按需注册用到的图标
 const icons = {
+  Grid,
+  Box,
   ArrowLeft,
   ArrowRight,
   Calendar,

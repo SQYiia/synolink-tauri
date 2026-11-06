@@ -1,173 +1,123 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { enqueueImage } from '../utils/imageQueue'
+import { dsm, MediaError } from '../api/dsm'
 
-/**
- * 可视区懒加载缩略图：进入视口才加载真实 src，离开不销毁已加载图片。
- *
- * 关键性能优化：
- * 1. 所有实例共享一个全局 IntersectionObserver（而非每个组件 new 一个），
- *    对包含几千个卡片的场景，能把 IO 实例从 N 个降到 1 个。
- * 2. 全局并发队列：缩略图请求最多 MAX_CONCURRENT 个同时加载，避免一次性
- *    发出几十上百个请求堆压 dsm:// 代理导致干脱或超时。
- */
-const props = withDefaults(
-  defineProps<{
-    src: string
-    alt?: string
-    aspectRatio?: string
-    /** 预加载余量：距视口 ? 像素时开始加载 */
-    rootMargin?: string
-  }>(),
-  { alt: '', aspectRatio: '1/1', rootMargin: '400px' },
-)
-
-// ---- 全局共享 observer ----
-type Handler = () => void
-const handlers = new WeakMap<Element, Handler>()
-let sharedObserver: IntersectionObserver | null = null
-
-function getObserver(rootMargin: string): IntersectionObserver {
-  if (sharedObserver) return sharedObserver
-  if (typeof IntersectionObserver === 'undefined') return null as any
-  sharedObserver = new IntersectionObserver(
-    (entries) => {
-      for (const e of entries) {
-        if (e.isIntersecting) {
-          const h = handlers.get(e.target)
-          if (h) {
-            handlers.delete(e.target)
-            sharedObserver!.unobserve(e.target)
-            h()
-          }
-        }
-      }
-    },
-    { rootMargin, threshold: 0 },
-  )
-  return sharedObserver
-}
-
-function watchElement(el: Element, onEnter: Handler, rootMargin: string) {
-  const ob = getObserver(rootMargin)
-  if (!ob) { onEnter(); return }
-  handlers.set(el, onEnter)
-  ob.observe(el)
-}
-function unwatchElement(el: Element) {
-  if (!sharedObserver) return
-  if (handlers.has(el)) {
-    handlers.delete(el)
-    sharedObserver.unobserve(el)
-  }
-}
-
-// ---- 全局缩略图并发队列 ----
-// 限制同时加载的缩略图数量，避免大量图片同时请求 dsm:// 代理导致
-// 网络拥塞与浏览器资源竟争。
-const MAX_CONCURRENT = 6
-let activeCount = 0
-type QueueTask = { run: () => void; cancelled: boolean }
-const queue: QueueTask[] = []
-
-function schedule(task: QueueTask) {
-  if (activeCount < MAX_CONCURRENT) {
-    activeCount++
-    task.run()
-  } else {
-    queue.push(task)
-  }
-}
-function releaseSlot() {
-  activeCount = Math.max(0, activeCount - 1)
-  while (activeCount < MAX_CONCURRENT && queue.length) {
-    const next = queue.shift()!
-    if (next.cancelled) continue
-    activeCount++
-    next.run()
-  }
-}
-function cancelTask(task: QueueTask | null) {
-  if (!task) return
-  task.cancelled = true
-}
-
-// ---- 组件自身 ----
+const props = withDefaults(defineProps<{
+  src: string
+  fallbackSrc?: string
+  alt?: string
+  aspectRatio?: string
+  rootMargin?: string
+  fit?: 'contain' | 'cover'
+  eager?: boolean
+  retryable?: boolean
+}>(), { alt: '', fallbackSrc: '', aspectRatio: '1/1', rootMargin: '400px', fit: 'cover', eager: false, retryable: true })
 const root = ref<HTMLElement | null>(null)
 const actualSrc = ref('')
-const failed = ref(false)
-let currentTask: QueueTask | null = null
-let slotHeld = false
+const errorMessage = ref('')
+let observer: IntersectionObserver | null = null
+let cancel: (() => void) | null = null
+let controller: AbortController | null = null
+let loader: HTMLImageElement | null = null
+let generation = 0
 
-function loadNow() {
-  slotHeld = true
-  actualSrc.value = props.src
+function reset() {
+  generation++
+  observer?.disconnect()
+  observer = null
+  controller?.abort()
+  controller = null
+  if (loader) { loader.src = ''; loader = null }
+  cancel?.()
+  cancel = null
+  if (actualSrc.value) URL.revokeObjectURL(actualSrc.value)
+  actualSrc.value = ''
 }
-
-function start() {
-  if (!root.value) return
-  watchElement(root.value, () => {
-    const task: QueueTask = { cancelled: false, run: loadNow }
-    currentTask = task
-    schedule(task)
-  }, props.rootMargin)
-}
-
-function releaseIfHeld() {
-  if (slotHeld) {
-    slotHeld = false
-    releaseSlot()
+async function load() {
+  if (cancel) return
+  observer?.disconnect()
+  const version = generation
+  // A disk-cache hit must not wait behind remote downloads or video decoders.
+  cancel = () => {}
+  const cached = await dsm.cachedMediaImageBlob(props.src)
+  if (version !== generation) return
+  if (cached) {
+    const url = URL.createObjectURL(cached)
+    try {
+      const image = new Image(); loader = image; image.src = url
+      await image.decode()
+      if (version !== generation) { URL.revokeObjectURL(url); return }
+      actualSrc.value = url
+      return
+    } catch { URL.revokeObjectURL(url) }
   }
+  if (version !== generation) return
+  cancel = enqueueImage(done => {
+    const abort = new AbortController()
+    controller = abort
+    let timedOut = false
+    const timeout = setTimeout(() => { timedOut = true; abort.abort() }, 45000)
+    void (async () => {
+      let lastError: unknown
+      try {
+        for (const source of [props.src, props.fallbackSrc].filter(Boolean)) {
+          if (version !== generation) return
+          let objectUrl = ''
+          try {
+            const blob = await dsm.mediaImageBlob(source, abort.signal)
+            if (version !== generation) return
+            objectUrl = URL.createObjectURL(blob)
+            const image = new Image()
+            loader = image
+            image.src = objectUrl
+            await image.decode()
+            if (version !== generation) { URL.revokeObjectURL(objectUrl); return }
+            actualSrc.value = objectUrl
+            errorMessage.value = ''
+            return
+          } catch (error) {
+            if (objectUrl) URL.revokeObjectURL(objectUrl)
+            lastError = error
+            if (abort.signal.aborted || (error instanceof MediaError && [105, 106, 107, 119].includes(error.code ?? 0))) break
+          }
+        }
+        if (version === generation) {
+          errorMessage.value = timedOut ? '图片加载超时' : lastError instanceof MediaError ? lastError.message : '图片格式无法显示或读取失败'
+        }
+      } finally { clearTimeout(timeout); done() }
+    })()
+  })
 }
-
-onMounted(() => { start() })
-
-// 若 props.src 发生变化（例如从空变成真正的 URL），重置状态再观察。
-// 注意：不清空已加载的 actualSrc，让旧缩略图保持可见，直到新图加载
-// 完成才被浏览器替换，避免滚动时的"闪烁到 placeholder"现象。
-watch(() => props.src, (n, o) => {
-  if (n === o) return
-  failed.value = false
-  cancelTask(currentTask)
-  currentTask = null
-  releaseIfHeld()
-  if (root.value) unwatchElement(root.value)
+function start() {
+  reset()
+  errorMessage.value = ''
+  if (!root.value || !props.src) return
+  if (props.eager || typeof IntersectionObserver === 'undefined') { load(); return }
+  observer = new IntersectionObserver(entries => {
+    if (entries.some(entry => entry.isIntersecting)) load()
+  }, { rootMargin: props.rootMargin })
+  observer.observe(root.value)
+}
+onMounted(start)
+watch(() => [props.src, props.fallbackSrc], start)
+onBeforeUnmount(reset)
+function retry(event: MouseEvent) {
+  if (!props.retryable) return
+  event.stopPropagation()
   start()
-})
-
-onBeforeUnmount(() => {
-  if (root.value) unwatchElement(root.value)
-  cancelTask(currentTask)
-  currentTask = null
-  releaseIfHeld()
-})
-
-function onLoad() { releaseIfHeld() }
-function onError() { failed.value = true; releaseIfHeld() }
+}
 </script>
 
 <template>
-  <div
-    ref="root"
-    class="lazy-thumb"
-    :style="{ aspectRatio: props.aspectRatio }"
-  >
-    <img
-      v-if="actualSrc && !failed"
-      :src="actualSrc"
-      :alt="alt"
-      class="img"
-      decoding="async"
-      @load="onLoad"
-      @error="onError"
-    />
-    <div v-else-if="failed" class="fallback">
-      <slot name="fallback">
-        <el-icon :size="28"><Picture /></el-icon>
-      </slot>
-    </div>
-    <div v-else class="placeholder">
-      <slot name="placeholder" />
-    </div>
+  <div ref="root" class="lazy-thumb" :style="{ aspectRatio: props.aspectRatio }">
+    <img v-if="actualSrc" :src="actualSrc" :alt="alt" class="img" decoding="async" />
+    <component :is="retryable ? 'button' : 'div'" v-else-if="errorMessage" class="fallback retry" :type="retryable ? 'button' : undefined" @click="retry" :aria-label="retryable ? '重新加载 ' + alt : undefined" :title="errorMessage">
+      <slot name="fallback"><span>图片加载失败</span></slot>
+      <span class="error-reason">{{ errorMessage }}</span>
+      <span v-if="retryable">点击重新请求</span>
+    </component>
+    <div v-else class="placeholder"><slot name="placeholder">加载中…</slot></div>
   </div>
 </template>
 
@@ -182,10 +132,12 @@ function onError() { failed.value = true; releaseIfHeld() }
 .img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: v-bind(fit);
   display: block;
   transition: opacity var(--sl-transition-normal, 0.25s);
 }
+.error-reason { max-width: 95%; overflow-wrap: anywhere; padding: 0 6px; }
+.retry { border: 0; background: transparent; flex-direction: column; gap: 6px; cursor: pointer; font-size: 11px; }
 .fallback,
 .placeholder {
   width: 100%;

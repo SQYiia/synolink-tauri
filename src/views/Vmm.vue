@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed, reactive } from 'vue'
 import type { ActionSheetAction } from 'vant'
 import { useVmm, getVmmStatusLabel, type VmmGuest } from '../composables/useVmm'
 import { useIsMobile } from '../composables/useIsMobile'
+import { dsm } from '../api/dsm'
+import { ElMessage } from 'element-plus'
 import { confirm } from '../utils/feedback'
 
 const isMobile = useIsMobile()
@@ -10,7 +12,7 @@ const isMobile = useIsMobile()
 const sheetOpen = ref(false)
 const sheetActions = ref<ActionSheetAction[]>([])
 function openGuestActions(g: VmmGuest) {
-  const actions: ActionSheetAction[] = []
+  const actions: ActionSheetAction[] = [{ name: '详情与配置', callback: () => openDetails(g) } as any]
   if (g.status === 'shutdown' || g.status === 'crashed') {
     actions.push({ name: '开机', callback: () => powerOn(g.guestId) } as any)
   }
@@ -27,8 +29,35 @@ function onSheetSelect(action: ActionSheetAction) {
   ;(action as any).callback?.()
 }
 
-const { guests, hosts, storages, loading, available, startPolling, refresh, powerOn, shutdown, powerOff } = useVmm()
+const { guests, hosts, storages, loading, available, reason, busy, save, startPolling, refresh, powerOn, shutdown, powerOff } = useVmm()
 
+const detailOpen = ref(false)
+const selectedId = ref('')
+const selectedContext = ref('')
+const selectedGuest = computed(() => guests.value.find(g => g.guestId === selectedId.value))
+const form = reactive({ name: '', description: '', autorun: 0, cpu: 1, ram: 1024 })
+const original = ref({ name: '', description: '', autorun: 0, cpu: 1, ram: 1024 })
+const canEdit = computed(() => !!selectedGuest.value && ['shutdown', 'running'].includes(selectedGuest.value.status) && !busy[selectedId.value])
+function openDetails(g: VmmGuest) {
+  selectedId.value = g.guestId
+  selectedContext.value = JSON.stringify([dsm.baseUrl, dsm.account])
+  Object.assign(form, { name: g.guestName, description: g.description, autorun: g.autorun, cpu: g.vcpuNum, ram: g.vramSize })
+  original.value = { ...form }; detailOpen.value = true
+}
+async function saveDetails() {
+  if (!canEdit.value || selectedContext.value !== JSON.stringify([dsm.baseUrl, dsm.account])) return
+  if (!form.name.trim() || !Number.isInteger(form.cpu) || form.cpu < 1 || !Number.isInteger(form.ram) || form.ram < 1) { ElMessage.warning('请填写名称及有效的 CPU、内存数值'); return }
+  const changes: Parameters<typeof dsm.vmmGuestSet>[1] = {}
+  if (form.name.trim() !== original.value.name) changes.new_guest_name = form.name.trim()
+  if (form.description !== original.value.description) changes.description = form.description
+  if (form.autorun !== original.value.autorun) changes.autorun = form.autorun
+  if (form.cpu !== original.value.cpu || form.ram !== original.value.ram) {
+    if (selectedGuest.value?.status !== 'shutdown') { ElMessage.warning('请先关闭虚拟机，再修改 CPU 或内存'); return }
+    changes.vcpu_num = form.cpu; changes.vram_size = form.ram
+  }
+  if (!Object.keys(changes).length) { detailOpen.value = false; return }
+  if (await save(selectedId.value, changes)) detailOpen.value = false
+}
 function isTransitioning(status: string) {
   return ['booting', 'shutting_down', 'moving', 'stor_migrating', 'creating', 'importing', 'preparing'].includes(status)
 }
@@ -75,11 +104,12 @@ async function onPullRefresh() {
 <template>
   <div class="vmm-page">
     <van-pull-refresh v-model="refreshing" @refresh="onPullRefresh" :disabled="!isMobile">
+    <el-alert v-if="reason" :title="reason" type="warning" :closable="false" show-icon />
     <!-- 未安装提示 -->
     <div v-if="!available" class="vmm-unavailable">
       <el-icon :size="40"><Monitor /></el-icon>
-      <h3>Virtual Machine Manager 未安装</h3>
-      <p>请在群晖套件中心安装 VMM</p>
+      <h3>Virtual Machine Manager 不可用</h3>
+      <p>请检查 VMM 套件及当前账号权限</p>
       <el-button @click="refresh">重试</el-button>
     </div>
 
@@ -145,24 +175,25 @@ async function onPullRefresh() {
             <div v-if="g.description" class="vmm-card-desc">{{ g.description }}</div>
             <!-- 桌面操作按钮 -->
             <div v-if="!isMobile" class="vmm-card-actions">
+              <el-button size="small" @click="openDetails(g)">详情与配置</el-button>
               <el-button
                 v-if="g.status === 'shutdown' || g.status === 'crashed'"
                 size="small"
                 type="success"
-                @click="handlePowerOn(g)"
+                :disabled="!!busy[g.guestId]" @click="handlePowerOn(g)"
               >开机</el-button>
               <el-button
                 v-if="g.status === 'running'"
                 size="small"
                 type="warning"
-                @click="handleShutdown(g)"
+                :disabled="!!busy[g.guestId]" @click="handleShutdown(g)"
               >关机</el-button>
               <el-button
                 v-if="g.status === 'running'"
                 size="small"
                 type="danger"
                 plain
-                @click="handlePowerOff(g)"
+                :disabled="!!busy[g.guestId]" @click="handlePowerOff(g)"
               >强制关机</el-button>
               <span v-if="isTransitioning(g.status)" class="vmm-card-wait">
                 <el-icon class="is-loading"><Loading /></el-icon>
@@ -213,6 +244,28 @@ async function onPullRefresh() {
       </div>
     </template>
 
+    <el-dialog v-model="detailOpen" title="虚拟机详情与配置" :width="isMobile ? '94%' : '640px'" :close-on-click-modal="false">
+      <template v-if="selectedGuest">
+        <div class="vmm-detail-summary"><el-tag>{{ getVmmStatusLabel(selectedGuest.status).label }}</el-tag><span>{{ selectedGuest.storageName }}</span></div>
+        <el-form label-position="top" :disabled="!canEdit">
+          <el-form-item label="名称"><el-input v-model="form.name" /></el-form-item>
+          <el-form-item label="描述"><el-input v-model="form.description" type="textarea" :rows="2" /></el-form-item>
+          <el-form-item label="NAS 启动时"><el-select v-model="form.autorun"><el-option label="保持关机" :value="0" /><el-option label="恢复上次状态" :value="1" /><el-option label="自动开机" :value="2" /></el-select></el-form-item>
+          <div class="vmm-resource-fields">
+            <el-form-item label="CPU 核心"><el-input-number v-model="form.cpu" :min="1" :precision="0" :disabled="selectedGuest.status !== 'shutdown'" /></el-form-item>
+            <el-form-item label="内存（MB）"><el-input-number v-model="form.ram" :min="1" :step="256" :precision="0" :disabled="selectedGuest.status !== 'shutdown'" /></el-form-item>
+          </div>
+          <p class="vmm-detail-note">CPU 和内存需在关机后修改，实际可分配资源由 NAS 校验。</p>
+        </el-form>
+        <div class="vmm-hardware"><h4>磁盘与网络</h4>
+          <p v-for="(disk, i) in selectedGuest.disks" :key="disk.vdisk_id">磁盘 {{ i + 1 }} · {{ (disk.vdisk_size / 1024).toFixed(1) }} GB</p>
+          <p v-for="nic in selectedGuest.nics" :key="nic.vnic_id">{{ nic.network_name || '未连接网络' }} · {{ nic.mac }}</p>
+          <p v-if="!selectedGuest.disks.length && !selectedGuest.nics.length">NAS 暂未返回磁盘与网卡信息</p>
+        </div>
+      </template>
+      <el-empty v-else description="虚拟机已不可用，请刷新列表" />
+      <template #footer><el-button :disabled="!!busy[selectedId]" @click="detailOpen = false">关闭</el-button><el-button type="primary" :disabled="!canEdit" :loading="!!busy[selectedId]" @click="saveDetails">保存修改</el-button></template>
+    </el-dialog>
     <van-action-sheet
       v-if="isMobile"
       v-model:show="sheetOpen"
@@ -226,6 +279,11 @@ async function onPullRefresh() {
 </template>
 
 <style scoped>
+.vmm-detail-summary { display:flex; gap:12px; align-items:center; margin-bottom:20px; }
+.vmm-resource-fields { display:flex; flex-wrap:wrap; gap:24px; }
+.vmm-detail-note,.vmm-hardware { color:var(--el-text-color-secondary); font-size:12px; line-height:1.8; }
+.vmm-hardware { border-top:1px solid var(--el-border-color); margin-top:20px; overflow-wrap:anywhere; }
+
 .vmm-page {
   display: flex;
   flex-direction: column;
@@ -362,6 +420,7 @@ async function onPullRefresh() {
   gap: 8px;
   align-items: center;
   margin-top: 4px;
+  flex-wrap: wrap;
 }
 .vmm-card-wait {
   display: flex;

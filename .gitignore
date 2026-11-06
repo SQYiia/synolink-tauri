@@ -25,3 +25,18 @@ dist-ssr
 .qoder/
 .vscode
 .claude
+
+.npm-cache/
+
+# Local credentials and signing material
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Local assistant workspace state
+.codex/
+.agents/

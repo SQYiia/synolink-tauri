@@ -1,11 +1,15 @@
+import { onActivated, onDeactivated } from 'vue'
 import { onMounted, onUnmounted, ref } from 'vue'
 import { dsm } from '../api/dsm'
+import { parseMemory } from '../utils/memory'
 
 const HISTORY_MAX = 60
 
 export function useSystemMonitor(opts: { autoStart?: boolean; pollMs?: number } = {}) {
   const cpuPct = ref(0)
-  const memPct = ref(0)
+  const memPct = ref<number | null>(null)
+  const memInstalled = ref<number | null>(null)
+  const memAvailable = ref(false)
   const memTotal = ref(0)
   const memUsed = ref(0)
   const netSend = ref(0)
@@ -31,15 +35,17 @@ export function useSystemMonitor(opts: { autoStart?: boolean; pollMs?: number } 
   async function refreshUtil() {
     try {
       const res = await dsm.systemUtilization()
+      if (!res.success || !res.data) throw new Error('性能数据读取失败')
       if (res.success && res.data) {
         const d: any = res.data
         const cpu = d.cpu ?? {}
         cpuPct.value = Math.min(100, Number(cpu.user_load ?? 0) + Number(cpu.system_load ?? 0))
-        const mem = d.memory ?? {}
-        memTotal.value = Number(mem.total_real ?? 0) * 1024
-        const avail = Number(mem.avail_real ?? mem.avail ?? 0) * 1024
-        memUsed.value = Math.max(0, memTotal.value - avail)
-        memPct.value = memTotal.value ? Math.round((memUsed.value / memTotal.value) * 100) : 0
+        const mem = parseMemory(d.memory)
+        memTotal.value = mem.totalBytes ?? 0
+        memUsed.value = mem.usedBytes ?? 0
+        memPct.value = mem.percentage
+        memInstalled.value = mem.installedBytes
+        memAvailable.value = mem.usedBytes != null && mem.totalBytes != null
         const nets: any[] = d.network ?? []
         const total = nets.find((n: any) => n.device === 'total') ?? nets[0] ?? {}
         netSend.value = Number(total.tx ?? 0)
@@ -51,11 +57,12 @@ export function useSystemMonitor(opts: { autoStart?: boolean; pollMs?: number } 
         lastUpdate.value = new Date().toLocaleTimeString()
 
         pushHistory(cpuHistory.value, cpuPct.value)
-        pushHistory(memHistory.value, memPct.value)
+        if (memPct.value != null) pushHistory(memHistory.value, memPct.value)
+        else memHistory.value = []
         pushHistory(netSendHistory.value, netSend.value)
         pushHistory(netRecvHistory.value, netRecv.value)
       }
-    } catch (e) { console.warn('[monitor] refreshUtil failed:', e) }
+    } catch (e) { memPct.value = null; memAvailable.value = false; memInstalled.value = null; memHistory.value = []; console.warn('[monitor] refreshUtil failed:', e) }
   }
 
   function normalizeVolume(v: any) {
@@ -151,10 +158,12 @@ export function useSystemMonitor(opts: { autoStart?: boolean; pollMs?: number } 
       startPolling()
     })
     onUnmounted(stopPolling)
+    onActivated(startPolling)
+    onDeactivated(stopPolling)
   }
 
   return {
-    cpuPct, memPct, memTotal, memUsed,
+    cpuPct, memPct, memTotal, memUsed, memAvailable, memInstalled,
     netSend, netRecv, diskRead, diskWrite,
     volumes, disks, sharesCount, lastUpdate, loading,
     cpuHistory, memHistory, netSendHistory, netRecvHistory,

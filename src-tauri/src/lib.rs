@@ -12,6 +12,9 @@ use tokio::io::AsyncWriteExt;
 #[derive(Default, Clone)]
 struct Session {
     base_url: String,
+    account: String,
+    allow_insecure: bool,
+    media_scope: String,
     sid: String,
     syno_token: String,
 }
@@ -19,6 +22,7 @@ struct Session {
 struct AppState {
     session: RwLock<Session>,
     http: reqwest::Client,
+    insecure_http: reqwest::Client,
     cancels: RwLock<HashMap<String, Arc<AtomicBool>>>,
     thumb_cache_dir: RwLock<Option<PathBuf>>,
     thumb_write_counter: AtomicUsize,
@@ -26,16 +30,21 @@ struct AppState {
 
 impl Default for AppState {
     fn default() -> Self {
-        let http = reqwest::Client::builder()
+        let insecure_http = reqwest::Client::builder()
             .danger_accept_invalid_certs(true)
             .danger_accept_invalid_hostnames(true)
-            .timeout(Duration::from_secs(30))
+            .read_timeout(Duration::from_secs(60))
             .connect_timeout(Duration::from_secs(10))
             .build()
             .expect("failed to build reqwest client");
+        let http = reqwest::Client::builder()
+            .read_timeout(Duration::from_secs(60))
+            .connect_timeout(Duration::from_secs(10))
+            .build().expect("failed to build secure reqwest client");
         Self {
             session: RwLock::new(Session::default()),
             http,
+            insecure_http,
             cancels: RwLock::new(HashMap::new()),
             thumb_cache_dir: RwLock::new(None),
             thumb_write_counter: AtomicUsize::new(0),
@@ -65,17 +74,52 @@ fn set_session(
     base_url: String,
     sid: String,
     syno_token: String,
+    account: String,
+    allow_insecure: bool,
+    media_scope: String,
 ) {
     let mut s = write_session(&state);
     s.base_url = base_url.trim_end_matches('/').to_string();
     s.sid = sid;
     s.syno_token = syno_token;
+    s.account = account;
+    s.allow_insecure = allow_insecure;
+    s.media_scope = media_scope;
 }
 
 #[tauri::command]
 fn clear_session(state: tauri::State<'_, AppState>) {
     let mut s = write_session(&state);
     *s = Session::default();
+}
+
+fn credential(account_id: &str) -> Result<keyring::Entry, String> {
+    if !cfg!(any(target_os = "windows", target_os = "macos", target_os = "ios", target_os = "linux")) {
+        return Err("当前平台暂不支持安全保存密码".into());
+    }
+    keyring::Entry::new("com.zhoujianxiang.synolink", account_id).map_err(|_| "无法访问系统凭据库".into())
+}
+
+#[tauri::command]
+fn save_password(account_id: String, password: String) -> Result<(), String> {
+    credential(&account_id)?.set_password(&password).map_err(|_| "系统凭据库保存失败".into())
+}
+
+#[tauri::command]
+fn read_password(account_id: String) -> Result<Option<String>, String> {
+    match credential(&account_id)?.get_password() {
+        Ok(password) => Ok(Some(password)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(_) => Err("无法读取系统凭据库".into()),
+    }
+}
+
+#[tauri::command]
+fn delete_password(account_id: String) -> Result<(), String> {
+    match credential(&account_id)?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(_) => Err("无法删除已保存的凭据".into()),
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -132,8 +176,18 @@ fn unique_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
 
 /// 用 task_id 前 8 字符生成唯一的临时文件名，避免同名文件并发下载冲突
 fn part_filename(task_id: &str, name: &str) -> String {
-    let short_id = if task_id.len() >= 8 { &task_id[..8] } else { task_id };
-    format!("{}.{}.synodownload", name, short_id)
+    format!("{}.{}.synodownload", name, safe_filename(task_id))
+}
+
+fn dsm_error_code(bytes: &[u8]) -> Option<i64> {
+    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    if value.get("success")?.as_bool()? { return None; }
+    value.get("error")?.get("code")?.as_i64()
+}
+
+struct CancelRegistration { app: tauri::AppHandle, task_id: String }
+impl Drop for CancelRegistration {
+    fn drop(&mut self) { cleanup_cancel(&self.app, &self.task_id); }
 }
 
 #[tauri::command]
@@ -143,14 +197,20 @@ async fn download_to_file(
     path: String,
     name: String,
     save_dir: Option<String>,
+    source_url: String,
+    source_account: String,
 ) -> Result<(), String> {
     let (session, cancel_flag) = {
         let state = app.state::<AppState>();
         let session = read_session(&state);
+        if session.base_url != source_url || session.account != source_account || session.sid.is_empty() {
+            return Err("请先登录任务所属的服务器和账号，再继续下载".into());
+        }
         let flag = Arc::new(AtomicBool::new(false));
         write_cancels(&state).insert(task_id.clone(), flag.clone());
         (session, flag)
     };
+    let _registration = CancelRegistration { app: app.clone(), task_id: task_id.clone() };
 
     if session.base_url.is_empty() {
         return Err("session not set".into());
@@ -171,10 +231,14 @@ async fn download_to_file(
     let final_name = safe_filename(&name);
     let part_path = dl_dir.join(part_filename(&task_id, &final_name));
 
-    let resume_from: u64 = match std::fs::metadata(&part_path) {
+    let mut resume_from: u64 = match std::fs::metadata(&part_path) {
         Ok(m) => m.len(),
         Err(_) => 0,
     };
+    let validator_path = part_path.with_extension("validator");
+    let validator = std::fs::read_to_string(&validator_path).unwrap_or_default();
+    // Without a validator we cannot know whether the remote file changed.
+    if validator.is_empty() { resume_from = 0; }
 
     let url = format!(
         "{}/webapi/entry.cgi?api=SYNO.FileStation.Download&version=2&method=download&mode=open&path={}&_sid={}",
@@ -185,7 +249,7 @@ async fn download_to_file(
 
     let http = {
         let state = app.state::<AppState>();
-        state.http.clone()
+        if session.allow_insecure { state.insecure_http.clone() } else { state.http.clone() }
     };
 
     let mut req = http.get(&url);
@@ -194,11 +258,21 @@ async fn download_to_file(
     }
     if resume_from > 0 {
         req = req.header("Range", format!("bytes={}-", resume_from));
+        req = req.header("If-Range", &validator);
     }
 
     let resp = req.send().await.map_err(|e| e.to_string())?;
     let status = resp.status();
     let supports_resume = status.as_u16() == 206;
+    if supports_resume {
+        let start = resp.headers().get("content-range").and_then(|h| h.to_str().ok())
+            .and_then(|h| h.strip_prefix("bytes ")).and_then(|h| h.split('-').next())
+            .and_then(|n| n.parse::<u64>().ok());
+        if start != Some(resume_from) { return Err("服务器返回的续传位置不匹配，请重新下载".into()); }
+    }
+    let inspect_error = !resp.headers().contains_key("content-disposition")
+        && resp.headers().get("content-type").and_then(|h| h.to_str().ok())
+            .map(|h| h.contains("json") || h.contains("text/plain")).unwrap_or(false);
     if !status.is_success() {
         let _ = app.emit(
             "download:error",
@@ -210,6 +284,14 @@ async fn download_to_file(
         cleanup_cancel(&app, &task_id);
         return Err(format!("HTTP {}", status));
     }
+    let next_validator = resp.headers().get("etag")
+        .filter(|h| !h.as_bytes().starts_with(b"W/"))
+        .or_else(|| resp.headers().get("last-modified"))
+        .and_then(|h| h.to_str().ok()).unwrap_or("");
+    if supports_resume && resume_from > 0 && !next_validator.is_empty() && next_validator != validator {
+        return Err("远端文件已变化，请移除任务后重新下载".into());
+    }
+    std::fs::write(&validator_path, next_validator).map_err(|e| e.to_string())?;
 
     let total: u64 = if supports_resume {
         resp.headers()
@@ -236,6 +318,7 @@ async fn download_to_file(
     let mut loaded: u64 = if supports_resume { resume_from } else { 0 };
 
     let mut last_emit = Instant::now();
+    let mut response_prefix = Vec::new();
     let mut last_loaded = loaded;
     const EMIT_BYTES: u64 = 256 * 1024;
     const EMIT_MS: u128 = 200;
@@ -275,6 +358,10 @@ async fn download_to_file(
             );
             msg
         })?;
+        if inspect_error && response_prefix.len() <= 65536 {
+            let keep = bytes.len().min(65537 - response_prefix.len());
+            response_prefix.extend_from_slice(&bytes[..keep]);
+        }
         file.write_all(&bytes)
             .await
             .map_err(|e| format!("write: {}", e))?;
@@ -299,6 +386,15 @@ async fn download_to_file(
     file.flush().await.map_err(|e| format!("flush: {}", e))?;
     drop(file);
 
+    if inspect_error && response_prefix.len() <= 65536 {
+        if let Some(code) = dsm_error_code(&response_prefix) {
+            let _ = tokio::fs::remove_file(&part_path).await;
+            let _ = tokio::fs::remove_file(&validator_path).await;
+            cleanup_cancel(&app, &task_id);
+            return Err(format!("NAS 拒绝下载（错误码 {}），请检查登录状态和文件权限后重试", code));
+        }
+    }
+
     // 完整性校验：如果服务器报告了 total 且实际写入不匹配，视为失败
     if total > 0 && loaded != total {
         let msg = format!("incomplete download: got {} of {} bytes", loaded, total);
@@ -317,6 +413,7 @@ async fn download_to_file(
     tokio::fs::rename(&part_path, &final_path)
         .await
         .map_err(|e| format!("rename: {}", e))?;
+    let _ = tokio::fs::remove_file(&validator_path).await;
 
     let _ = app.emit(
         "download:progress",
@@ -500,6 +597,32 @@ fn guess_mime(path: &str) -> Option<&'static str> {
     })
 }
 
+fn image_mime(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(&[0xff, 0xd8, 0xff]) { return Some("image/jpeg"); }
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") { return Some("image/png"); }
+    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") { return Some("image/gif"); }
+    if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") { return Some("image/webp"); }
+    if bytes.starts_with(b"BM") { return Some("image/bmp"); }
+    None
+}
+
+fn validate_image_body(bytes: &[u8]) -> Result<&'static str, String> {
+    if let Some(code) = dsm_error_code(bytes) { return Err(format!("NAS 图片接口错误（{}）", code)); }
+    image_mime(bytes).ok_or_else(|| "NAS 未返回可显示的图片，请检查缩略图或文件格式".into())
+}
+
+async fn collect_image_body<S, B, E>(mut stream: S, limit: usize) -> Result<Vec<u8>, String>
+where S: futures_util::Stream<Item = Result<B, E>> + Unpin,
+      B: AsRef<[u8]>, E: std::fmt::Display {
+    let mut bytes = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| e.to_string())?;
+        if chunk.as_ref().len() > limit.saturating_sub(bytes.len()) { return Err("图片过大，请下载后查看".into()); }
+        bytes.extend_from_slice(chunk.as_ref());
+    }
+    Ok(bytes)
+}
+
 // ===== 缩略图本地磁盘缓存 =====
 // 缓存目录：app_cache_dir/thumbs/
 // 键：size 前缀 + 16 位 16 进制 hash(base_url + path + size)
@@ -537,6 +660,7 @@ fn thumb_cache_key(base_url: &str, path: &str, size: &str) -> String {
 
 fn thumb_cache_read(dir: &Path, key: &str) -> Option<Vec<u8>> {
     let p = dir.join(key);
+    if std::fs::metadata(&p).ok()?.modified().ok()?.elapsed().ok()? > Duration::from_secs(300) { return None; }
     let bytes = std::fs::read(&p).ok()?;
     if bytes.is_empty() {
         return None;
@@ -657,20 +781,23 @@ async fn proxy(
     let parsed = url::Url::parse(&uri).map_err(|e| format!("bad uri: {}", e))?;
     let kind = parsed.path();
     let params: HashMap<_, _> = parsed.query_pairs().into_owned().collect();
+    if session.sid.is_empty() || params.get("scope") != Some(&session.media_scope) {
+        return Err("媒体会话已失效，请重新打开文件".into());
+    }
     let path = params.get("path").cloned().unwrap_or_default();
     if path.is_empty() {
         return Err("missing path".into());
     }
 
     let (target, is_stream, is_thumb, thumb_size) = match kind {
-        "/stream" => (
+        "/stream" | "/image" => (
             format!(
                 "{}/webapi/entry.cgi?api=SYNO.FileStation.Download&version=2&method=download&mode=open&path={}&_sid={}",
                 session.base_url,
-                encode_path(&path),
+                encode_path(&serde_json::to_string(&[&path]).map_err(|e| e.to_string())?),
                 session.sid,
             ),
-            true,
+            kind == "/stream",
             false,
             String::new(),
         ),
@@ -681,7 +808,7 @@ async fn proxy(
                     "{}/webapi/entry.cgi?api=SYNO.FileStation.Thumb&version=2&method=get&size={}&path={}&_sid={}",
                     session.base_url,
                     size,
-                    encode_path(&path),
+                    encode_path(&serde_json::to_string(&path).map_err(|e| e.to_string())?),
                     session.sid,
                 ),
                 false,
@@ -696,13 +823,14 @@ async fn proxy(
     let cache_meta = if is_thumb {
         if let Some(app) = app.as_ref() {
             if let Some(dir) = thumb_cache_dir(app) {
-                let key = thumb_cache_key(&session.base_url, &path, &thumb_size);
-                if let Some(bytes) = thumb_cache_read(&dir, &key) {
+                let scope = format!("{}:{}:{}", session.base_url, session.account, session.sid);
+                let key = thumb_cache_key(&scope, &path, &thumb_size);
+                if let Some(bytes) = thumb_cache_read(&dir, &key).filter(|b| image_mime(b).is_some()) {
                     return Response::builder()
                         .status(200)
-                        .header("Content-Type", "image/jpeg")
+                        .header("Content-Type", image_mime(&bytes).unwrap())
                         .header("Content-Length", bytes.len().to_string())
-                        .header("Cache-Control", "public, max-age=31536000, immutable")
+                        .header("Cache-Control", "private, max-age=300")
                         .header("Access-Control-Allow-Origin", "*")
                         .body(bytes)
                         .map_err(|e| e.to_string());
@@ -724,6 +852,8 @@ async fn proxy(
     }
     let effective_range = if is_stream {
         Some(clamp_range(range.as_deref()))
+    } else if kind == "/image" || is_thumb {
+        None
     } else {
         range.clone()
     };
@@ -736,7 +866,14 @@ async fn proxy(
     let headers = resp.headers().clone();
 
     // 如果是 stream 且服务端返回 200（不支持 Range），截断到 MAX_CHUNK 防止内存爆炸
-    let bytes = if is_stream && status.as_u16() == 200 {
+    let bytes = if kind == "/image" || is_thumb {
+        // Images must be complete: never apply the video range/truncation policy.
+        let limit = if is_thumb { 16 * 1024 * 1024 } else { 64 * 1024 * 1024 };
+        let buf = collect_image_body(resp.bytes_stream(), limit).await?;
+        if !status.is_success() { return Err(format!("图片请求失败（HTTP {}）", status)); }
+        validate_image_body(&buf)?;
+        buf.into()
+    } else if is_stream && status.as_u16() == 200 {
         let mut buf = Vec::with_capacity(MAX_CHUNK as usize);
         let mut stream = resp.bytes_stream();
         while let Some(chunk) = stream.next().await {
@@ -761,9 +898,10 @@ async fn proxy(
     let mut has_ct = false;
     for (k, v) in headers.iter() {
         let name = k.as_str().to_ascii_lowercase();
-        if is_stream && name == "content-type" {
+        if (is_stream || is_thumb || kind == "/image") && name == "content-type" {
             continue;
         }
+        if (is_thumb || kind == "/image") && matches!(name.as_str(), "content-length" | "cache-control") { continue; }
         if matches!(
             name.as_str(),
             "content-type"
@@ -789,6 +927,12 @@ async fn proxy(
         }
         builder = builder.header("Accept-Ranges", "bytes");
     }
+    if is_thumb || kind == "/image" {
+        builder = builder.header("Content-Type", image_mime(&bytes).unwrap_or("application/octet-stream"))
+            .header("Content-Length", bytes.len().to_string())
+            .header("Cache-Control", "private, max-age=300");
+        has_ct = true;
+    }
     if !has_ct {
         builder = builder.header("Content-Type", "application/octet-stream");
     }
@@ -796,7 +940,7 @@ async fn proxy(
 
     // 缩略图请求成功后写入本地缓存
     if let Some((dir, key)) = cache_meta {
-        if status.is_success() && !bytes.is_empty() {
+        if status.is_success() && image_mime(&bytes).is_some() {
             let dir_for_write = dir.clone();
             let bytes_for_write = bytes.to_vec();
             tauri::async_runtime::spawn_blocking(move || {
@@ -827,7 +971,8 @@ fn dsm_protocol(
     tauri::async_runtime::spawn(async move {
         let state = app.state::<AppState>();
         let session = read_session(&state);
-        let resp = match proxy(&state.http, session, uri, range, Some(app.clone())).await {
+        let client = if session.allow_insecure { &state.insecure_http } else { &state.http };
+        let resp = match proxy(client, session, uri, range, Some(app.clone())).await {
             Ok(r) => r,
             Err(e) => Response::builder()
                 .status(500)
@@ -851,6 +996,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             set_session,
             clear_session,
+            save_password,
+            read_password,
+            delete_password,
             download_to_file,
             cancel_download,
             get_default_download_dir,
@@ -862,4 +1010,54 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_dsm_failure_without_rejecting_normal_json() {
+        assert_eq!(dsm_error_code(br#"{"success":false,"error":{"code":119}}"#), Some(119));
+        assert_eq!(dsm_error_code(br#"{"success":true,"data":{}}"#), None);
+        assert_eq!(dsm_error_code(br#"{"message":"hello"}"#), None);
+        assert_eq!(dsm_error_code(b"JPEG bytes"), None);
+    }
+
+    #[test]
+    fn simultaneous_tasks_never_share_a_partial_file() {
+        assert_ne!(part_filename("1761921111111-a", "video.mp4"), part_filename("1761921111111-b", "video.mp4"));
+        assert!(!part_filename("../task", "video.mp4").contains('/'));
+    }
+
+    #[test]
+    fn thumbnail_cache_is_partitioned_by_identity() {
+        assert_ne!(thumb_cache_key("nas:alice", "/photo.jpg", "small"), thumb_cache_key("nas:bob", "/photo.jpg", "small"));
+    }
+
+    #[test]
+    fn full_image_larger_than_video_chunk_is_not_truncated() {
+        let mut bytes = vec![0; (MAX_CHUNK + 1024) as usize];
+        bytes[..3].copy_from_slice(&[0xff, 0xd8, 0xff]);
+        let chunks: Vec<Result<Vec<u8>, String>> = bytes.chunks(512 * 1024).map(|b| Ok(b.to_vec())).collect();
+        let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let result = runtime.block_on(collect_image_body(futures_util::stream::iter(chunks), 64 * 1024 * 1024)).unwrap();
+        assert_eq!(result, bytes);
+        assert_eq!(validate_image_body(&result).unwrap(), "image/jpeg");
+    }
+
+    #[test]
+    fn thumbnail_json_failure_is_not_returned_as_an_image() {
+        let error = validate_image_body(br#"{"success":false,"error":{"code":119}}"#).unwrap_err();
+        assert!(error.contains("119"));
+        assert_eq!(image_mime(br#"{"success":false}"#), None);
+    }
+
+    #[test]
+    fn oversized_images_fail_instead_of_returning_a_truncated_success() {
+        let chunks = futures_util::stream::iter(vec![Ok::<Vec<u8>, String>(vec![0; 10]), Ok(vec![0; 10])]);
+        let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        assert!(runtime.block_on(collect_image_body(chunks, 15)).is_err());
+    }
+
 }

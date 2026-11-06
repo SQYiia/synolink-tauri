@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '../stores/app'
 import { dsm } from '../api/dsm'
+import { parseMemory } from '../utils/memory'
 import { formatBytes, formatSpeed } from '../utils/format'
 import { useIsMobile } from '../composables/useIsMobile'
 import FolderIcon from '../components/FolderIcon.vue'
@@ -21,7 +22,9 @@ async function onPullRefresh() {
 }
 
 const cpuPct = ref(0)
-const memPct = ref(0)
+const memPct = ref<number | null>(null)
+  const memInstalled = ref<number | null>(null)
+  const memAvailable = ref(false)
 const memUsed = ref(0)
 const memTotal = ref(0)
 const netSend = ref(0)
@@ -34,15 +37,17 @@ let timer: ReturnType<typeof setInterval> | null = null
 async function refreshUtil() {
   try {
     const res = await dsm.systemUtilization()
+      if (!res.success || !res.data) throw new Error('性能数据读取失败')
     if (res.success && res.data) {
       const d: any = res.data
       const cpu = d.cpu ?? {}
       cpuPct.value = Math.min(100, Number(cpu.user_load ?? 0) + Number(cpu.system_load ?? 0))
-      const mem = d.memory ?? {}
-      memTotal.value = Number(mem.total_real ?? 0) * 1024
-      const avail = Number(mem.avail_real ?? mem.avail ?? 0) * 1024
-      memUsed.value = Math.max(0, memTotal.value - avail)
-      memPct.value = memTotal.value ? Math.round((memUsed.value / memTotal.value) * 100) : 0
+      const mem = parseMemory(d.memory)
+        memTotal.value = mem.totalBytes ?? 0
+        memUsed.value = mem.usedBytes ?? 0
+        memPct.value = mem.percentage
+        memInstalled.value = mem.installedBytes
+        memAvailable.value = mem.usedBytes != null && mem.totalBytes != null
       const nets: any[] = d.network ?? []
       const total = nets.find((n: any) => n.device === 'total') ?? nets[0] ?? {}
       netSend.value = Number(total.tx ?? 0)
@@ -52,7 +57,7 @@ async function refreshUtil() {
       diskRead.value = Number(total2.read_byte ?? 0)
       diskWrite.value = Number(total2.write_byte ?? 0)
     }
-  } catch { /* ignore */ }
+  } catch { memPct.value = null; memAvailable.value = false; memInstalled.value = null }
 }
 
 interface DashApp {
@@ -64,6 +69,10 @@ interface DashApp {
 }
 
 const ALL_APPS: DashApp[] = [
+  { id: 'drive', label: 'Drive', to: '/app/drive', icon: 'Folder', color: '#3B82F6' },
+  { id: 'backups', label: '备份中心', to: '/app/backups', icon: 'CircleCheck', color: '#059669' },
+  { id: 'applications', label: '应用中心', to: '/app/applications', icon: 'Grid', color: '#4F68C4' },
+  { id: 'containers', label: '容器', to: '/app/containers', icon: 'Box', color: '#387FA3' },
   { id: 'files',      label: '文件',   to: '/app/files',      icon: 'Folder',       color: '#3B82F6' },
   { id: 'album',      label: '相册',   to: '/app/album',      icon: 'Picture',      color: '#EC4899' },
   { id: 'videos',     label: '视频',   to: '/app/videos',     icon: 'VideoCamera',  color: '#8B5CF6' },
@@ -74,7 +83,7 @@ const ALL_APPS: DashApp[] = [
 ]
 
 const MOBILE_ICON_MAP: Record<string, string> = {
-  Folder: 'folder', Picture: 'photo-o', VideoCamera: 'video-o',
+  CircleCheck: 'shield-o', Grid: 'apps-o', Box: 'cluster-o', Folder: 'folder', Picture: 'photo-o', VideoCamera: 'video-o',
   Connection: 'down', Odometer: 'bar-chart-o', Monitor: 'cluster-o', User: 'user-o',
 }
 
@@ -107,6 +116,12 @@ onMounted(() => {
   timer = setInterval(refreshUtil, 5000)
 })
 
+onActivated(() => {
+  if (timer) clearInterval(timer)
+  timer = setInterval(refreshUtil, 5000)
+})
+onDeactivated(() => { if (timer) { clearInterval(timer); timer = null } })
+
 onUnmounted(() => {
   if (timer) clearInterval(timer)
 })
@@ -130,7 +145,7 @@ onUnmounted(() => {
       <van-cell-group inset style="margin: 0">
         <van-cell title="CPU 使用率" :value="cpuPct + '%'" />
         <van-cell title="内存">
-          <template #value>{{ formatBytes(memUsed) }} / {{ formatBytes(memTotal) }}</template>
+          <template #value>{{ memAvailable ? '约 ' + formatBytes(memUsed) + ' / ' + formatBytes(memTotal) : '未返回' }}</template>
         </van-cell>
         <van-cell title="网络">
           <template #value>↑ {{ formatSpeed(netSend) }} · ↓ {{ formatSpeed(netRecv) }}</template>
@@ -167,7 +182,8 @@ onUnmounted(() => {
     </div>
   </van-pull-refresh>
 
-  <div v-else class="dash-page">
+  <div v-else class="dash-page ui-dashboard">
+    <header class="workspace-heading"><span>你的 NAS 工作空间</span><h1>概览</h1><p>管理文件、浏览媒体，随时了解设备运行状态。</p></header>
     <!-- 顶部个人栏 -->
     <div class="dash-profile">
       <div class="dash-profile-left">
@@ -199,9 +215,9 @@ onUnmounted(() => {
         <div class="dash-stat-icon" style="background: rgba(99,102,241,0.1); color: #6366F1">
           <el-icon :size="18"><Coin /></el-icon>
         </div>
-        <div class="dash-stat-content">
-          <div class="dash-stat-label">内存</div>
-          <div class="dash-stat-value">{{ formatBytes(memUsed) }}<span class="dash-stat-sub"> / {{ formatBytes(memTotal) }}</span></div>
+        <div class="dash-stat-content" :title="'系统可用内存口径；已用容量按占用率估算。已安装：' + (memInstalled == null ? '未返回' : formatBytes(memInstalled))">
+          <div class="dash-stat-label">内存 · {{ memPct == null ? '未返回' : memPct + '%' }}</div>
+          <div class="dash-stat-value">{{ memAvailable ? '约 ' + formatBytes(memUsed) : '未返回' }}<span v-if="memAvailable" class="dash-stat-sub"> / {{ formatBytes(memTotal) }}</span></div>
         </div>
       </div>
       <div class="dash-stat-card">

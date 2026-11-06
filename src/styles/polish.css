@@ -1,0 +1,64 @@
+html body, body #app { font-family: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif; }
+/* Shared surfaces and spacing, with explicit page scopes to protect media viewers. */
+html:root:not(.dark) { --background: 220 25% 97%; --foreground: 222 28% 15%; --muted: 220 20% 94%; --muted-foreground: 220 10% 44%; --border: 220 17% 89%; --radius: 10px; }
+html.dark { --background: 222 20% 9%; --card: 222 18% 12%; --popover: 222 18% 12%; --border: 220 13% 21%; --muted: 222 14% 17%; --radius: 10px; }
+body .workspace-heading { margin: 0 0 28px; }
+body .workspace-heading > span { font-size: 11px; letter-spacing: .12em; color: hsl(var(--muted-foreground)); }
+body .workspace-heading h1 { margin: 8px 0; font-size: 28px; letter-spacing: -.04em; font-weight: 650; }
+body .workspace-heading p { margin: 0; font-size: 12px; line-height: 1.7; color: hsl(var(--muted-foreground)); }
+body .app-shell .sidebar { width: 184px; padding: 14px 10px; box-sizing: border-box; }
+body .sidebar-brand { display: flex; align-items: center; gap: 10px; padding: 10px 10px 26px; text-decoration: none; color: hsl(var(--foreground)); }
+body .brand-mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: hsl(var(--foreground)); color: hsl(var(--background)); font-size: 19px; font-weight: 650; }
+body .sidebar-brand strong { font-size: 16px; letter-spacing: -.04em; }
+body .app-shell .sidebar .nav-item { flex-direction: row; justify-content: flex-start; gap: 12px; margin: 2px 0; padding: 12px 14px; font-size: 12px; border-radius: 9px; }
+body .app-shell .sidebar .nav-item.active { background: hsl(var(--brand) / .09); color: hsl(var(--brand)); font-weight: 600; }
+body .app-shell .sidebar .nav-item.active::before { display: none; }
+body .app-shell .sidebar-bottom { padding-top: 12px; }
+body .app-shell .content { background: hsl(var(--background)); }
+body .ui-dashboard.dash-page, body .mon-page.mon-page, body .vmm-page.vmm-page, body .ui-settings.page { padding: 30px 32px; max-width: 1280px; box-sizing: border-box; }
+body .ui-dashboard .dash-profile, body .ui-settings .profile { background: hsl(var(--card)); padding: 20px 22px; border: 1px solid hsl(var(--border)); border-radius: 14px; }
+body .ui-dashboard .dash-stats { gap: 16px; margin-top: 20px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+body .ui-dashboard .dash-stat-card, body .mon-page .stat-card { padding: 22px; border-radius: 14px; box-shadow: 0 2px 8px hsl(var(--foreground) / .025); }
+body .ui-dashboard .dash-stat-value, body .mon-page .stat-number { font-variant-numeric: tabular-nums; font-weight: 600; }
+body .ui-dashboard .dash-app-item { padding: 24px 16px; border-radius: 14px; transition: transform .16s, box-shadow .16s; }
+body .ui-dashboard .dash-app-item:hover { transform: translateY(-2px); box-shadow: 0 8px 20px hsl(var(--foreground) / .06); }
+body .ui-dashboard .dash-app-icon { width: 48px; height: 48px; border-radius: 14px; }
+body .ui-dashboard .dash-section-title, body .mon-page .section-title, body .ui-settings .section-title { margin: 28px 0 14px; font-size: 12px; letter-spacing: .02em; }
+body .mon-page .mon-head { padding: 0 0 22px; margin-bottom: 24px; }
+body .mon-page .mon-title { font-size: 26px; letter-spacing: -.03em; }
+body .mon-page .grid, body .ui-settings .grid { gap: 16px; }
+body .mon-page .vol-card, body .mon-page .disk-card, body .ui-settings .vol-card, body .ui-settings .disk-card, body .ui-settings .info-card { border-radius: 12px; padding: 18px 20px; }
+body .ui-settings .stat-card { border-radius: 12px; }
+body .ui-settings .stat-body { padding: 20px; }body .ui-settings .name { font-size: 18px; }body .ui-settings .info-row { padding: 14px 0; }
+body .ui-servers.page { max-width: 1000px; margin: 0 auto; padding: 48px 32px; box-sizing: border-box; }
+body .ui-servers .hero { padding-bottom: 28px; margin-bottom: 24px; }body .ui-servers .hero h1 { font-size: 32px; letter-spacing: -.05em; }body .ui-servers .hero p { margin-top: 8px; }
+body .ui-servers .server-card { padding: 24px; border-radius: 16px; margin-bottom: 14px; background: hsl(var(--card)); transition: box-shadow .18s, border-color .18s; }
+body .ui-servers .server-card:hover { box-shadow: 0 8px 24px hsl(var(--foreground) / .06); border-color: hsl(var(--brand) / .35); }body .ui-servers .card-name { font-size: 16px; }body .ui-servers .card-url { margin-top: 6px; }
+body .ui-login.page, body .ui-add-server.page { background: radial-gradient(ellipse at 50% 25%, hsl(var(--brand) / .06), transparent 65%), hsl(var(--background)); }
+body .ui-login .login-card, body .ui-add-server .form-card { background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: 20px; box-shadow: 0 16px 50px hsl(var(--foreground) / .055); padding: 32px; }
+body .ui-login .card-title { font-size: 22px; }body .ui-login .card-avatar { border-radius: 16px; }
+body .ui-files.page { background: hsl(var(--background)); }
+body .ui-files > .el-header { height: auto; padding: 22px 24px 14px; background: hsl(var(--card)); border-bottom: 1px solid hsl(var(--border)); }
+body .ui-files .page-title { font-size: 23px; letter-spacing: -.03em; }
+body .ui-files .el-main { padding: 18px 24px; }body .ui-files .el-table { border-radius: 12px; border: 1px solid hsl(var(--border)); }
+body .ui-files .el-table th.el-table__cell { background: hsl(var(--muted) / .6); height: 44px; font-size: 11px; font-weight: 550; }
+body .ui-files .el-table td.el-table__cell { padding-top: 12px; padding-bottom: 12px; }
+body .ds-page.ds-page { padding: 28px 32px; }body .ds-page .ds-title { font-size: 25px; letter-spacing: -.03em; }body .ds-page .el-table { border: 1px solid hsl(var(--border)); border-radius: 12px; }
+body .ds-page .el-table td.el-table__cell { padding: 14px 0; }
+body .ds-page .ds-header { margin-bottom: 24px; }
+body .vmm-page .vmm-card { border-radius: 14px; box-shadow: 0 2px 8px hsl(var(--foreground) / .025); }
+body .ui-files .el-input__wrapper, body .ui-login .el-input__wrapper, body .ui-add-server .el-input__wrapper { min-height: 32px; }
+body .el-button:focus-visible, body a:focus-visible, body button:focus-visible { outline: 2px solid hsl(var(--brand)); outline-offset: 3px; }
+@media (max-width: 1100px) and (min-width: 641px) {
+  body .ui-dashboard .dash-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  body .app-shell .sidebar { width: 72px; padding: 12px 6px; }body .sidebar-brand { justify-content: center; padding: 8px 0 20px; }body .sidebar-brand strong { display: none; }
+  body .app-shell .sidebar .nav-item { flex-direction: column; justify-content: center; gap: 5px; font-size: 10px; padding: 10px 4px; }
+  body .ui-dashboard.dash-page, body .mon-page.mon-page, body .vmm-page.vmm-page, body .ui-settings.page { padding: 24px; }
+  body .ui-files .header { flex-wrap: wrap; gap: 8px; }
+}
+@media (max-width: 640px) {
+  body .vmm-page.vmm-page, body .ds-page.ds-page { padding: 16px 12px; }
+  body .m-profile-card, body .m-stat-card, body .m-dash-tile { border-radius: 14px; }
+  body .van-cell-group--inset { border: 1px solid hsl(var(--border)); border-radius: 12px; }
+}
+@media (prefers-reduced-motion: reduce) { body .ui-dashboard .dash-app-item:hover { transform: none; } }

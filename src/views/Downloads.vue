@@ -4,13 +4,22 @@ import { ElMessage } from 'element-plus'
 import type { ActionSheetAction } from 'vant'
 import { dsm } from '../api/dsm'
 import { formatBytes, formatSpeed } from '../utils/format'
-import { useDownloadStation, getStatusLabel, type DSTask } from '../composables/useDownloadStation'
+import { useDownloadStation, getStatusLabel, getTaskHint, type DSTask } from '../composables/useDownloadStation'
 import FolderPicker from '../components/FolderPicker.vue'
+import DownloadSettings from '../components/DownloadSettings.vue'
 import { useIsMobile } from '../composables/useIsMobile'
 import { confirm } from '../utils/feedback'
 
-const { tasks, statistic, loading, available, reason, startPolling, retry, refresh: dsRefresh, createTask, createTaskFile, pauseTasks, resumeTasks, deleteTasks } = useDownloadStation()
+const { tasks, statistic, loading, available, reason, lastUpdate, startPolling, retry, refresh: dsRefresh, createTask, createTaskFile, pauseTasks, resumeTasks, deleteTasks } = useDownloadStation()
 
+const detailOpen = ref(false)
+const detailId = ref('')
+const detailTask = computed(() => tasks.value.find(task => task.id === detailId.value))
+function showDetails(task: DSTask) { detailId.value = task.id; detailOpen.value = true }
+async function runAction(action: () => Promise<void>) {
+  try { await action(); return true }
+  catch (error: any) { ElMessage.error(error?.message || '操作失败，请刷新后重试'); return false }
+}
 const selected = ref<DSTask[]>([])
 const createOpen = ref(false)
 const createUri = ref('')
@@ -35,12 +44,12 @@ const selectedIds = computed(() => selected.value.map(t => t.id))
 const sheetOpen = ref(false)
 const sheetActions = ref<ActionSheetAction[]>([])
 function openTaskActions(task: DSTask) {
-  const actions: ActionSheetAction[] = []
+  const actions: ActionSheetAction[] = [{ name: '任务详情', callback: () => showDetails(task) } as any]
   if (task.status === 'downloading' || task.status === 'waiting' || task.status === 'seeding') {
-    actions.push({ name: '暂停', callback: () => pauseTasks([task.id]) } as any)
+    actions.push({ name: '暂停', callback: () => handlePauseOne(task) } as any)
   }
   if (task.status === 'paused') {
-    actions.push({ name: '恢复', callback: () => resumeTasks([task.id]) } as any)
+    actions.push({ name: '恢复', callback: () => handleResumeOne(task) } as any)
   }
   actions.push({ name: '删除', color: '#EF4444', callback: () => handleDeleteOne(task) } as any)
   sheetActions.value = actions
@@ -53,7 +62,7 @@ function onSheetSelect(action: ActionSheetAction) {
 
 function progress(t: DSTask) {
   if (!t.size) return 0
-  return Math.round((t.sizeDownloaded / t.size) * 100)
+  return Math.max(0, Math.min(100, Math.round((t.sizeDownloaded / t.size) * 100)))
 }
 
 function progressColor(t: DSTask) {
@@ -64,7 +73,7 @@ function progressColor(t: DSTask) {
 }
 
 function taskSpeed(t: DSTask) {
-  if (t.status === 'downloading') return formatSpeed(t.speedDownload)
+  if (t.status === 'downloading') return t.speedKnown ? formatSpeed(t.speedDownload) : '未返回'
   if (t.status === 'seeding') return '↑ ' + formatSpeed(t.speedUpload)
   return ''
 }
@@ -103,6 +112,8 @@ async function handleCreate() {
         showClose: true,
       })
     }
+  } catch {
+    ElMessage.error('未能确认任务是否创建成功，请先刷新任务列表，避免重复提交')
   } finally {
     creating.value = false
   }
@@ -119,36 +130,33 @@ function onDestPicked(path: string) {
 
 async function handlePause() {
   if (!selectedIds.value.length) return
-  await pauseTasks(selectedIds.value)
-  selected.value = []
+  if (await runAction(() => pauseTasks(selectedIds.value))) selected.value = []
 }
 
 async function handleResume() {
   if (!selectedIds.value.length) return
-  await resumeTasks(selectedIds.value)
-  selected.value = []
+  if (await runAction(() => resumeTasks(selectedIds.value))) selected.value = []
 }
 
 async function handleDelete() {
   if (!selectedIds.value.length) return
   const ok = await confirm(`确定删除选中的 ${selectedIds.value.length} 个任务？`, '删除任务', { danger: true, confirmText: '删除' })
   if (!ok) return
-  await deleteTasks(selectedIds.value)
-  selected.value = []
+  if (await runAction(() => deleteTasks(selectedIds.value))) selected.value = []
 }
 
 async function handleDeleteOne(task: DSTask) {
   const ok = await confirm(`确定删除「${task.title}」？`, '删除任务', { danger: true, confirmText: '删除' })
   if (!ok) return
-  await deleteTasks([task.id])
+  await runAction(() => deleteTasks([task.id]))
 }
 
 async function handlePauseOne(task: DSTask) {
-  await pauseTasks([task.id])
+  await runAction(() => pauseTasks([task.id]))
 }
 
 async function handleResumeOne(task: DSTask) {
-  await resumeTasks([task.id])
+  await runAction(() => resumeTasks([task.id]))
 }
 
 // BT Search
@@ -244,6 +252,7 @@ async function onPullRefresh() {
           <el-icon v-if="loading" class="is-loading" :size="14"><Loading /></el-icon>
         </div>
         <div class="ds-header-right">
+          <DownloadSettings />
           <el-button type="primary" size="small" @click="createOpen = true">
             <el-icon><Plus /></el-icon>新建任务
           </el-button>
@@ -253,6 +262,8 @@ async function onPullRefresh() {
         </div>
       </div>
 
+      <el-alert v-if="reason" :title="reason + '；当前数据可能不是最新状态'" type="warning" :closable="false" show-icon />
+      <div class="ds-refresh-status"><span>{{ lastUpdate ? '最后更新 ' + lastUpdate : '尚未获取任务状态' }}</span><el-button link :loading="loading" @click="dsRefresh()">刷新状态</el-button></div>
       <!-- 批量操作栏 -->
       <div v-if="selected.length" class="ds-batch">
         <span>已选 {{ selected.length }} 项</span>
@@ -276,6 +287,7 @@ async function onPullRefresh() {
             <template #default="{ row }">
               <span class="ds-type-icon">{{ typeIcon(row.type) }}</span>
               {{ row.title }}
+              <div v-if="getTaskHint(row)" class="ds-task-hint">{{ getTaskHint(row) }}</div>
             </template>
           </el-table-column>
           <el-table-column label="大小" width="90" align="right">
@@ -303,8 +315,9 @@ async function onPullRefresh() {
               <span class="ds-speed-cell">{{ taskSpeed(row) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="120" align="center">
+          <el-table-column label="操作" width="160" align="center">
             <template #default="{ row }">
+              <el-button size="small" link @click="showDetails(row)">详情</el-button>
               <el-button
                 v-if="row.status === 'downloading' || row.status === 'waiting' || row.status === 'seeding'"
                 size="small" link type="warning" @click="handlePauseOne(row)"
@@ -345,6 +358,7 @@ async function onPullRefresh() {
                   <span v-if="t.size">{{ formatBytes(t.size) }}</span>
                   <span v-if="taskSpeed(t)">{{ taskSpeed(t) }}</span>
                 </div>
+                <div v-if="getTaskHint(t)" class="ds-task-hint">{{ getTaskHint(t) }}</div>
                 <van-progress
                   v-if="t.size"
                   :percentage="progress(t)"
@@ -372,6 +386,23 @@ async function onPullRefresh() {
       />
     </template>
 
+    <el-dialog v-model="detailOpen" title="任务详情" :width="dialogWidthLg">
+      <template v-if="detailTask">
+        <h3 class="ds-detail-title">{{ detailTask.title }}</h3>
+        <el-alert v-if="getTaskHint(detailTask)" :title="getTaskHint(detailTask)" :closable="false" type="info" show-icon />
+        <el-descriptions :column="1" border class="ds-details">
+          <el-descriptions-item label="状态">{{ getStatusLabel(detailTask.status).label }}</el-descriptions-item>
+          <el-descriptions-item label="下载速度">{{ detailTask.speedKnown ? formatSpeed(detailTask.speedDownload) : 'NAS 未返回' }}</el-descriptions-item>
+          <el-descriptions-item label="已下载 / 总大小">{{ formatBytes(detailTask.sizeDownloaded) }} / {{ detailTask.size ? formatBytes(detailTask.size) : '未知' }}</el-descriptions-item>
+          <el-descriptions-item v-if="detailTask.type === 'bt'" label="已连接种子 / 下载节点">{{ detailTask.seeders ?? '未返回' }} / {{ detailTask.peers ?? '未返回' }}</el-descriptions-item>
+          <el-descriptions-item label="保存目录">{{ detailTask.destination || 'NAS 未返回' }}</el-descriptions-item>
+          <el-descriptions-item label="最后更新">{{ lastUpdate || '尚未更新' }}</el-descriptions-item>
+        </el-descriptions>
+        <p class="ds-task-hint">若速度持续为零，可对照群晖网页版 Download Station 中同一个任务的状态。</p>
+      </template>
+      <el-empty v-else description="任务已不存在，请刷新列表" />
+      <template #footer><el-button :loading="loading" @click="dsRefresh()">刷新状态</el-button><el-button @click="detailOpen = false">关闭</el-button></template>
+    </el-dialog>
     <!-- 新建任务对话框 -->
     <el-dialog v-model="createOpen" title="新建下载任务" :width="dialogWidth" destroy-on-close>
       <el-form label-position="top">
@@ -389,13 +420,14 @@ async function onPullRefresh() {
             :limit="1"
             accept=".torrent,.nzb"
             @change="onFileChange"
+            @remove="createFile = null"
           >
             <el-button size="small">选择文件</el-button>
           </el-upload>
         </el-form-item>
         <el-form-item label="保存目录（可选）">
           <div style="display: flex; gap: 8px; width: 100%">
-            <el-input v-model="createDest" placeholder="默认 Downloads 目录" readonly />
+            <el-input v-model="createDest" placeholder="使用 NAS 下载站设置的默认目录" readonly />
             <el-button @click="destPickerOpen = true">选择</el-button>
           </div>
         </el-form-item>
@@ -445,6 +477,11 @@ async function onPullRefresh() {
 </template>
 
 <style scoped>
+.ds-refresh-status { display:flex; align-items:center; justify-content:space-between; margin:12px 0; font-size:12px; color:var(--el-text-color-secondary); }
+.ds-task-hint { font-size:12px; line-height:1.6; margin-top:6px; color:var(--el-text-color-secondary); white-space:normal; }
+.ds-detail-title { overflow-wrap:anywhere; margin-top:0; }
+.ds-details { margin-top:16px; }
+
 .ds-page {
   display: flex;
   flex-direction: column;

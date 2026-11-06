@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { dsm } from '../api/dsm'
 import { formatBytes } from '../utils/format'
@@ -7,13 +7,14 @@ import { useMediaScan } from '../composables/useMediaScan'
 import { enqueue as enqueueDownload } from '../composables/useDownloadQueue'
 import FolderPicker from '../components/FolderPicker.vue'
 import LazyThumb from '../components/LazyThumb.vue'
+import PhotoViewer from '../components/PhotoViewer.vue'
 import { useIsMobile } from '../composables/useIsMobile'
 import { useBackHandler } from '../composables/useInteractiveSwipeBack'
 import { confirm, toast } from '../utils/feedback'
 
 const isMobile = useIsMobile()
 
-const IMG_EXT = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic'])
+const IMG_EXT = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif'])
 
 function isImage(f: any): boolean {
   if (f.isdir) return false
@@ -23,10 +24,10 @@ function isImage(f: any): boolean {
 }
 
 const {
-  folder, loading, items: photos,
-  scan, onPickFolder, onBaseUrlChange, initFromStorage,
+  folder, loading, scanError, items: photos,
+  scan, onPickFolder,
 } = useMediaScan({
-  extensions: 'jpg,jpeg,png,gif,webp,bmp,heic',
+  extensions: 'jpg,jpeg,png,gif,webp,bmp,heic,heif',
   filterFn: isImage,
   visibleInit: 120,
   visibleStep: 120,
@@ -37,6 +38,7 @@ const {
 
 const viewerOpen = ref(false)
 const viewerIndex = ref(0)
+const previewPhotos = shallowRef<any[]>([])
 const pickerOpen = ref(false)
 
 const scrollEl = ref<HTMLElement | null>(null)
@@ -109,14 +111,13 @@ function dateLabel(p: any): string {
   return label
 }
 
-const flatPhotos = computed(() => photos.value)
+const flatPhotos = computed(() => [...photos.value].sort((a, b) => photoTime(b) - photoTime(a) || String(a.path).localeCompare(String(b.path))))
 
 type Segment =
   | { type: 'header'; key: string; date: string; count: number; offset: number; height: number }
   | { type: 'row'; key: string; photos: any[]; offset: number; height: number }
 
 const segments = computed<Segment[]>(() => {
-  if (loading.value) return []
 
   const cols = colCount.value
   const cell = cellSize.value
@@ -213,47 +214,106 @@ function onScroll() {
   })
 }
 
-onMounted(() => {
-  const hasFolder = initFromStorage()
-  if (hasFolder) scan()
-
-  if (scrollEl.value) {
-    resizeObserver = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        containerWidth.value = entry.contentRect.width
-        viewportHeight.value = entry.contentRect.height
-      }
-    })
-    resizeObserver.observe(scrollEl.value)
-    containerWidth.value = scrollEl.value.clientWidth
-    viewportHeight.value = scrollEl.value.clientHeight
-  }
+function measure() {
+  if (!scrollEl.value) return
+  containerWidth.value = scrollEl.value.clientWidth
+  viewportHeight.value = scrollEl.value.clientHeight
+  scrollTop.value = scrollEl.value.scrollTop
+}
+watch(scrollEl, element => {
+  resizeObserver?.disconnect()
+  if (!element) return
+  resizeObserver = new ResizeObserver(measure)
+  resizeObserver.observe(element)
+  measure()
+}, { flush: 'post' })
+onActivated(measure)
+watch(folder, () => {
+  if (scrollEl.value) scrollEl.value.scrollTop = 0
+  scrollTop.value = 0
+  viewerOpen.value = false
+  mPreviewOpen.value = false
 })
-
-watch(() => dsm.baseUrl, () => { onBaseUrlChange() })
+watch(totalHeight, () => {
+  if (!scrollEl.value) return
+  const top = Math.max(0, Math.min(scrollTop.value, totalHeight.value - viewportHeight.value))
+  scrollEl.value.scrollTop = top
+  scrollTop.value = top
+}, { flush: 'post' })
 
 function thumbOf(p: any) {
   const cached = thumbCache.get(p)
   if (cached) return cached
-  const u = dsm.mediaUrl('thumb', p.path, { size: 'small' })
+  const u = dsm.mediaUrl('thumb', p.path, { size: 'small', ...imageRevision(p) })
   thumbCache.set(p, u)
   return u
 }
-function fullOf(p: any) {
-  return dsm.mediaUrl('stream', p.path)
+function imageRevision(p: any): Record<string, string> {
+  const time = p.additional?.time
+  // Without metadata, do not persist an unversioned copy of a mutable file.
+  return time?.mtime ? { revision: JSON.stringify([time.mtime, time.ctime ?? 0, p.additional?.size ?? p.size ?? 0]) } : {}
 }
-function onFullError(p: any) { p._fullFailed = true }
+function fullOf(p: any) {
+  return dsm.mediaUrl('image', p.path, imageRevision(p))
+}
+function fallbackOf(p: any) {
+  const size = Number(p.additional?.size ?? 0)
+  return size <= 64 * 1024 * 1024 && !/\.hei[cf]$/i.test(p.name) ? dsm.mediaUrl('image', p.path) : ''
+}
 
 // 移动端图片预览状态（组件式，比 showImagePreview 命令式更可控）
 const mPreviewOpen = ref(false)
-const mPreviewImages = ref<string[]>([])
 const mPreviewIndex = ref(0)
+const mPreviewStart = ref(0)
+const previewUrls = ref<Record<string, string>>({})
+const mPreviewImages = computed(() => previewPhotos.value.map(p => previewUrls.value[p.path] || ''))
+const mPreviewError = ref('')
+const mPreviewLoading = ref(false)
+const mPreviewRetry = ref(0)
+let mobileRequest: AbortController | null = null
+let mobileGeneration = 0
+function releaseMobilePreview() {
+  mobileRequest?.abort()
+  for (const url of Object.values(previewUrls.value)) URL.revokeObjectURL(url)
+  previewUrls.value = {}
+}
+onBeforeUnmount(releaseMobilePreview)
+watch([mPreviewOpen, mPreviewIndex, previewPhotos, mPreviewRetry], async () => {
+  const generation = ++mobileGeneration
+  mobileRequest?.abort()
+  mPreviewError.value = ''
+  mPreviewLoading.value = false
+  if (!mPreviewOpen.value) { releaseMobilePreview(); return }
+  const index = mPreviewIndex.value
+  const photo = previewPhotos.value[index]
+  if (!photo) return
+  const keep = new Set(previewPhotos.value.slice(Math.max(0, index - 1), index + 2).map(p => p.path))
+  for (const [path, url] of Object.entries(previewUrls.value)) {
+    if (!keep.has(path)) { URL.revokeObjectURL(url); delete previewUrls.value[path] }
+  }
+  if (previewUrls.value[photo.path]) return
+  const controller = new AbortController()
+  mobileRequest = controller
+  const timeout = setTimeout(() => controller.abort(), 45000)
+  mPreviewLoading.value = true
+  try {
+    const blob = await dsm.mediaImageBlob(fullOf(photo), controller.signal)
+    if (generation === mobileGeneration && mPreviewOpen.value) previewUrls.value[photo.path] = URL.createObjectURL(blob)
+  } catch (error: any) {
+    if (generation === mobileGeneration) mPreviewError.value = error?.name === 'MediaError' ? error.message : '图片读取失败或超时，请重试'
+  } finally {
+    clearTimeout(timeout)
+    if (generation === mobileGeneration) mPreviewLoading.value = false
+  }
+})
 
 function openPhoto(p: any) {
   const idx = flatPhotos.value.findIndex((x) => x.path === p.path)
   if (idx < 0) return
+  previewPhotos.value = [...flatPhotos.value]
   if (isMobile.value) {
-    mPreviewImages.value = flatPhotos.value.map((x: any) => fullOf(x))
+
+    mPreviewStart.value = idx
     mPreviewIndex.value = idx
     mPreviewOpen.value = true
   } else {
@@ -262,28 +322,29 @@ function openPhoto(p: any) {
   }
 }
 function prev() { if (viewerIndex.value > 0) viewerIndex.value-- }
-function next() { if (viewerIndex.value < flatPhotos.value.length - 1) viewerIndex.value++ }
+function next() { if (viewerIndex.value < previewPhotos.value.length - 1) viewerIndex.value++ }
 
 function onViewerKey(e: KeyboardEvent) {
+  if (document.querySelector('.el-message-box')) return
+  if (['ArrowLeft', 'ArrowRight'].includes(e.key)) e.preventDefault()
   if (e.key === 'ArrowLeft') prev()
   else if (e.key === 'ArrowRight') next()
   else if (e.key === 'Escape') viewerOpen.value = false
 }
 
 async function viewerDownload() {
-  const p = flatPhotos.value[viewerIndex.value]
+  const p = previewPhotos.value[viewerIndex.value]
   if (!p) return
   try {
     const size = Number((p as any).additional?.size || (p as any).size || 0)
-    enqueueDownload(p.path, p.name, size)
-    ElMessage.success('已加入下载队列')
+    await enqueueDownload(p.path, p.name, size)
   } catch (e: any) {
     ElMessage.error('下载失败：' + (e?.message ?? e))
   }
 }
 
 async function viewerDelete() {
-  const p = flatPhotos.value[viewerIndex.value]
+  const p = previewPhotos.value[viewerIndex.value]
   if (!p) return
   try {
     await ElMessageBox.confirm(`确定删除「${p.name}」？`, '删除', {
@@ -295,10 +356,11 @@ async function viewerDelete() {
     if (res.success) {
       ElMessage.success('已删除')
       photos.value = photos.value.filter((x: any) => x.path !== p.path)
-      if (viewerIndex.value >= flatPhotos.value.length) {
-        viewerIndex.value = Math.max(0, flatPhotos.value.length - 1)
+      previewPhotos.value = previewPhotos.value.filter((x: any) => x.path !== p.path)
+      if (viewerIndex.value >= previewPhotos.value.length) {
+        viewerIndex.value = Math.max(0, previewPhotos.value.length - 1)
       }
-      if (!flatPhotos.value.length) viewerOpen.value = false
+      if (!previewPhotos.value.length) viewerOpen.value = false
     } else {
       ElMessage.error(`删除失败 code=${res.error?.code}`)
     }
@@ -323,12 +385,11 @@ onBeforeUnmount(() => {
 // 移动端：选择目录后自动开扫
 async function onMobilePickFolder(p: string) {
   onPickFolder(p)
-  await scan()
 }
 
 // 移动端图片预览的删除/下载（操作当前预览中的图）
 async function mDeleteCurrent() {
-  const p = flatPhotos.value[mPreviewIndex.value]
+  const p = previewPhotos.value[mPreviewIndex.value]
   if (!p) return
   const ok = await confirm(`确定删除「${p.name}」？`, '删除', { danger: true, confirmText: '删除' })
   if (!ok) return
@@ -336,22 +397,22 @@ async function mDeleteCurrent() {
   if (res.success) {
     toast('已删除', 'success')
     photos.value = photos.value.filter((x: any) => x.path !== p.path)
-    mPreviewImages.value = flatPhotos.value.map((x: any) => fullOf(x))
-    if (mPreviewIndex.value >= mPreviewImages.value.length) {
-      mPreviewIndex.value = Math.max(0, mPreviewImages.value.length - 1)
+      previewPhotos.value = previewPhotos.value.filter((x: any) => x.path !== p.path)
+
+    if (mPreviewIndex.value >= previewPhotos.value.length) {
+      mPreviewIndex.value = Math.max(0, previewPhotos.value.length - 1)
     }
-    if (!mPreviewImages.value.length) mPreviewOpen.value = false
+    if (!previewPhotos.value.length) mPreviewOpen.value = false
   } else {
     toast(`删除失败 code=${res.error?.code}`, 'error')
   }
 }
 
-function mDownloadCurrent() {
-  const p = flatPhotos.value[mPreviewIndex.value]
+async function mDownloadCurrent() {
+  const p = previewPhotos.value[mPreviewIndex.value]
   if (!p) return
   const size = Number((p as any).additional?.size || (p as any).size || 0)
-  enqueueDownload(p.path, p.name, size)
-  toast('已加入下载队列', 'success')
+  await enqueueDownload(p.path, p.name, size)
 }
 
 // 侧滑返回：预览打开时优先关预览
@@ -382,7 +443,9 @@ useBackHandler(() => {
       <span class="count">共 {{ photos.length }} 张</span>
     </div>
 
-    <main ref="scrollEl" class="body" @scroll="onScroll" v-loading="loading">
+    <div v-if="loading" class="scan-status" role="status">正在更新相册，已发现 {{ photos.length }} 张，已有照片可继续浏览…</div>
+    <div v-if="scanError" class="scan-status" role="alert">{{ scanError }} <button @click="scan">重试扫描</button></div>
+    <main ref="scrollEl" class="body" @scroll="onScroll">
       <div v-if="!folder" class="empty">
         <el-icon :size="64" color="#c0c4cc"><Picture /></el-icon>
         <div style="margin-top:12px">请选择要浏览的图片目录</div>
@@ -394,14 +457,10 @@ useBackHandler(() => {
       </div>
 
       <template v-else>
-        <div v-if="loading" class="scan-progress">
-          <el-icon class="is-loading" :size="32"><Loading /></el-icon>
-          <div style="margin-top:12px">扫描中，已发现 {{ photos.length }} 张照片…</div>
-          <div class="hint">扫描完成后会一次性渲染网格</div>
-        </div>
+
 
         <div
-          v-if="!loading && floatingDate && floatingDateVisible && flatPhotos.length > 0"
+          v-if="floatingDate && floatingDateVisible && flatPhotos.length > 0"
           class="floating-date"
         >{{ floatingDate }}</div>
 
@@ -429,7 +488,7 @@ useBackHandler(() => {
                 @click="openPhoto(p)"
                 :title="p.name"
               >
-                <LazyThumb :src="thumbOf(p)" :alt="p.name" aspect-ratio="1/1">
+                <LazyThumb :src="thumbOf(p)" :fallback-src="fallbackOf(p)" :alt="p.name" aspect-ratio="1/1">
                   <template #fallback>
                     <el-icon :size="32"><Picture /></el-icon>
                   </template>
@@ -445,56 +504,12 @@ useBackHandler(() => {
       </template>
     </main>
 
-    <el-dialog
-      v-model="viewerOpen"
-      :title="flatPhotos[viewerIndex]?.name"
-      width="92%"
-      top="3vh"
-      destroy-on-close
-    >
-      <div class="viewer">
-        <el-button class="nav left" circle @click="prev" :disabled="viewerIndex <= 0">
-          <el-icon><ArrowLeft /></el-icon>
-        </el-button>
-        <template v-if="flatPhotos[viewerIndex]">
-          <img
-            v-if="!flatPhotos[viewerIndex]._fullFailed"
-            :src="fullOf(flatPhotos[viewerIndex])"
-            class="viewer-img"
-            @error="onFullError(flatPhotos[viewerIndex])"
-          />
-          <div v-else class="viewer-img placeholder">
-            <el-icon :size="64"><Picture /></el-icon>
-            <div style="margin-top:8px;color:#909399">图片加载失败</div>
-          </div>
-        </template>
-        <el-button
-          class="nav right"
-          circle
-          @click="next"
-          :disabled="viewerIndex >= flatPhotos.length - 1"
-        >
-          <el-icon><ArrowRight /></el-icon>
-        </el-button>
-      </div>
-      <div class="viewer-counter">{{ viewerIndex + 1 }} / {{ flatPhotos.length }}</div>
-      <div class="viewer-info" v-if="flatPhotos[viewerIndex]">
-        <span v-if="flatPhotos[viewerIndex].additional?.size">
-          {{ formatBytes(flatPhotos[viewerIndex].additional.size) }}
-        </span>
-        <span v-if="photoTime(flatPhotos[viewerIndex])">
-          {{ new Date(photoTime(flatPhotos[viewerIndex]) * 1000).toLocaleString() }}
-        </span>
-      </div>
-      <div class="viewer-actions">
-        <el-button type="primary" @click="viewerDownload">
-          <el-icon style="margin-right:4px"><Download /></el-icon>下载
-        </el-button>
-        <el-button type="danger" @click="viewerDelete">
-          <el-icon style="margin-right:4px"><Delete /></el-icon>删除
-        </el-button>
-      </div>
-    </el-dialog>
+    <PhotoViewer v-model="viewerOpen"
+      :src="previewPhotos[viewerIndex] ? fullOf(previewPhotos[viewerIndex]) : ''"
+      :name="previewPhotos[viewerIndex]?.name || ''" :index="viewerIndex" :total="previewPhotos.length"
+      :size="formatBytes(previewPhotos[viewerIndex]?.additional?.size || 0)"
+      :date="previewPhotos[viewerIndex] && photoTime(previewPhotos[viewerIndex]) ? new Date(photoTime(previewPhotos[viewerIndex]) * 1000).toLocaleString() : ''"
+      @prev="prev" @next="next" @download="viewerDownload" @delete="viewerDelete" />
 
     <FolderPicker v-model="pickerOpen" :initial="folder" title="选择相册目录" @confirm="onPickFolder" />
   </div>
@@ -510,6 +525,8 @@ useBackHandler(() => {
       <span v-if="folder && photos.length" class="m-album-count">{{ photos.length }} 张</span>
     </div>
 
+    <div v-if="loading" class="scan-status" role="status">正在更新相册，已发现 {{ photos.length }} 张，已有照片可继续浏览…</div>
+    <div v-if="scanError" class="scan-status" role="alert">{{ scanError }} <button @click="scan">重试扫描</button></div>
     <main ref="scrollEl" class="m-album-body" @scroll="onScroll">
       <van-empty v-if="!folder" image="search" description="请选择要浏览的图片目录">
         <van-button round type="primary" @click="pickerOpen = true">选择目录</van-button>
@@ -517,13 +534,10 @@ useBackHandler(() => {
       <van-empty v-else-if="!photos.length && !loading" image="default" description="此目录暂无图片" />
 
       <template v-else>
-        <div v-if="loading" class="m-scan-progress">
-          <van-loading size="24" />
-          <div style="margin-top:8px">已发现 {{ photos.length }} 张照片…</div>
-        </div>
+
 
         <div
-          v-if="!loading && floatingDate && floatingDateVisible && flatPhotos.length > 0"
+          v-if="floatingDate && floatingDateVisible && flatPhotos.length > 0"
           class="floating-date"
         >{{ floatingDate }}</div>
 
@@ -549,7 +563,7 @@ useBackHandler(() => {
                 :style="{ width: cellSize + 'px', height: cellSize + 'px' }"
                 @click="openPhoto(p)"
               >
-                <LazyThumb :src="thumbOf(p)" :alt="p.name" aspect-ratio="1/1">
+                <LazyThumb :src="thumbOf(p)" :fallback-src="fallbackOf(p)" :alt="p.name" aspect-ratio="1/1">
                   <template #fallback>
                     <van-icon name="photo-o" size="28" color="#c0c4cc" />
                   </template>
@@ -568,25 +582,27 @@ useBackHandler(() => {
     <FolderPicker v-model="pickerOpen" :initial="folder" title="选择相册目录" @confirm="onMobilePickFolder" />
 
     <!-- 移动端图片预览 -->
-    <van-image-preview
-      v-model:show="mPreviewOpen"
-      v-model:index="mPreviewIndex"
-      :images="mPreviewImages"
-      :closeable="true"
-      :show-index="true"
-    >
+    <van-image-preview v-model:show="mPreviewOpen" :images="mPreviewImages" :start-position="mPreviewStart"
+      closeable show-index @change="mPreviewIndex = $event">
       <template #cover>
-        <div class="m-preview-actions" :style="{ paddingBottom: `calc(var(--sl-safe-bottom) + 16px)` }">
-          <van-button size="small" round icon="down" @click="mDownloadCurrent">下载</van-button>
-          <van-button size="small" round icon="delete-o" type="danger" plain @click="mDeleteCurrent">删除</van-button>
+        <div class="m-preview-actions" :style="{ paddingBottom: 'calc(var(--sl-safe-bottom) + 16px)' }">
+          <span v-if="mPreviewLoading" style="color: white">正在读取原图…</span>
+          <span v-if="mPreviewError" style="color: white">{{ mPreviewError }}</span>
+          <van-button v-if="mPreviewError" size="small" @click.stop="mPreviewRetry++">重新请求</van-button>
+          <van-button size="small" round icon="down" @click.stop="mDownloadCurrent">下载</van-button>
+          <van-button size="small" round icon="delete-o" type="danger" plain @click.stop="mDeleteCurrent">删除</van-button>
         </div>
       </template>
     </van-image-preview>
+
+
   </div>
 </template>
 
 <style scoped>
+
 /* Desktop */
+.scan-status { padding: 8px 12px; flex-shrink: 0; font-size: 12px; color: var(--el-text-color-secondary); }
 .page {
   display: flex; flex-direction: column; height: 100%;
   padding: 20px 24px 0; max-width: 1400px; margin: 0 auto;
@@ -632,17 +648,6 @@ useBackHandler(() => {
 .cell:hover { opacity: 0.85; }
 .cell:active { opacity: 0.7; }
 .bottom-stat { text-align: center; padding: 16px 0; font-size: 12px; color: var(--el-text-color-secondary); }
-.viewer { position: relative; display: flex; justify-content: center; align-items: center; min-height: 70vh; background: #000; border-radius: var(--sl-radius-sm); overflow: hidden; }
-.viewer-img { max-width: 100%; max-height: 80vh; object-fit: contain; }
-.viewer-img.placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 300px; height: 300px; background: #222; color: #ccc; }
-.nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(255,255,255,0.15) !important; backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.3) !important; color: #fff !important; }
-.nav:hover { background: rgba(255,255,255,0.25) !important; }
-.nav.left { left: 12px; }
-.nav.right { right: 12px; }
-.viewer-counter { text-align: center; color: var(--el-text-color-secondary); margin-top: 8px; font-size: 12px; }
-.viewer-info { text-align: center; color: var(--el-text-color-secondary); font-size: 12px; margin-top: 6px; display: flex; justify-content: center; gap: 16px; }
-.viewer-actions { display: flex; justify-content: center; gap: 12px; margin-top: 10px; }
-
 /* Mobile */
 .m-album {
   height: 100%;

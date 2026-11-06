@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { invoke } from '@tauri-apps/api/core'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -18,6 +19,7 @@ const server = computed(() => app.servers.find(s => s.id === serverId))
 
 const form = reactive({ account: '', passwd: '', otp_code: '' })
 const loading = ref(false)
+const rememberPassword = ref(false)
 
 onMounted(async () => {
   await app.load()
@@ -27,7 +29,12 @@ onMounted(async () => {
     router.replace('/servers')
     return
   }
+  await invoke('clear_session')
   dsm.baseUrl = `${server.value.protocol}://${server.value.host}:${server.value.port}`
+  dsm.allowInsecure = !!server.value.allowInsecure
+  dsm.apiInfo = {}
+  dsm.dsSid = ''
+  dsm.account = ''
   dsm.synoToken = ''
   dsm.sid = ''
   try {
@@ -46,6 +53,7 @@ onMounted(async () => {
   if (last) {
     form.account = last.account
     form.passwd = last.password
+    rememberPassword.value = !!last.rememberPassword
   }
 })
 
@@ -84,7 +92,7 @@ async function submit() {
       if (res.success) {
         const existed = app.accounts.find(a => a.serverId === serverId && a.account === form.account)
         if (existed) {
-          existed.password = form.passwd
+          await app.saveCredential(existed, form.passwd, rememberPassword.value)
           existed.lastLoginTime = Date.now()
           await app.saveAccounts()
           await app.setCurrent(serverId, existed.id)
@@ -95,6 +103,7 @@ async function submit() {
             password: form.passwd,
             lastLoginTime: Date.now(),
           })
+          await app.saveCredential(acc, form.passwd, rememberPassword.value)
           await app.setCurrent(serverId, acc.id)
         }
         if (isMobile.value) showSuccessToast('登录成功')
@@ -137,7 +146,7 @@ function back() {
 
 <template>
   <!-- 桌面端 -->
-  <div v-if="!isMobile" class="page">
+  <div v-if="!isMobile" class="page ui-login">
     <div class="login-wrapper">
       <el-button class="back-btn" @click="back" circle>
         <el-icon><ArrowLeft /></el-icon>
@@ -157,6 +166,7 @@ function back() {
           <el-form-item label="密码">
             <el-input v-model="form.passwd" type="password" show-password autocomplete="current-password" placeholder="DSM 密码" size="large" />
           </el-form-item>
+          <el-checkbox v-model="rememberPassword">在系统凭据库保存密码</el-checkbox>
           <el-button type="primary" :loading="loading" size="large" style="width: 100%; margin-top: 8px;" @click="submit">登录</el-button>
         </el-form>
       </div>
@@ -189,6 +199,7 @@ function back() {
         />
       </van-cell-group>
 
+      <van-checkbox v-model="rememberPassword" style="margin-top: 16px">安全保存密码</van-checkbox>
       <div class="m-login-actions">
         <van-button type="primary" block round :loading="loading" @click="submit">登录</van-button>
       </div>

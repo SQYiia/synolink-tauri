@@ -1,3 +1,4 @@
+import { onActivated, onDeactivated } from 'vue'
 import { reactive, computed, onScopeDispose } from 'vue'
 import { dsm } from '../api/dsm'
 import { ElMessage } from 'element-plus'
@@ -11,6 +12,8 @@ export interface VmmGuest {
   autorun: number
   description: string
   storageName: string
+  disks: Array<{ vdisk_id: string; vdisk_size: number; controller: number }>
+  nics: Array<{ vnic_id: string; network_name: string; mac: string }>
 }
 
 export interface VmmHost {
@@ -63,6 +66,8 @@ function mapGuest(raw: any): VmmGuest {
     autorun: raw.autorun ?? 0,
     description: raw.description ?? '',
     storageName: raw.storage_name ?? '',
+    disks: raw.vdisks ?? [],
+    nics: raw.vnics ?? [],
   }
 }
 
@@ -96,6 +101,7 @@ const state = reactive({
   storages: [] as VmmStorage[],
   loading: false,
   available: true,
+  reason: '',
 })
 
 export const vmmGuests = computed(() => state.guests)
@@ -104,9 +110,24 @@ export const vmmStorages = computed(() => state.storages)
 export const vmmLoading = computed(() => state.loading)
 export const vmmAvailable = computed(() => state.available)
 
+let stateContext = ''
+function resetContext() {
+  const context = JSON.stringify([dsm.baseUrl, dsm.account])
+  if (context !== stateContext) {
+    stateContext = context
+    state.guests = []
+    state.hosts = []
+    state.storages = []
+    state.available = true
+    state.loading = false
+  }
+}
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
 export async function vmmRefresh() {
+  resetContext()
+  const context = stateContext
+  if (state.loading || document.hidden) return
   state.loading = true
   try {
     const [guestRes, hostRes, storageRes] = await Promise.all([
@@ -114,11 +135,14 @@ export async function vmmRefresh() {
       dsm.vmmHostList(),
       dsm.vmmStorageList(),
     ])
+    if (context !== JSON.stringify([dsm.baseUrl, dsm.account])) return
+    state.reason = ''
     if (guestRes.success && guestRes.data) {
       state.guests = ((guestRes.data as any).guests ?? []).map(mapGuest)
       state.available = true
     } else {
       const code = guestRes.error?.code
+      state.reason = vmmError(code)
       if (code === 102 || code === 103) {
         state.available = false
         return
@@ -131,9 +155,9 @@ export async function vmmRefresh() {
       state.storages = ((storageRes.data as any).storages ?? []).map(mapStorage)
     }
   } catch {
-    // network error
+    if (context === JSON.stringify([dsm.baseUrl, dsm.account])) state.reason = '无法刷新虚拟机状态，请检查 NAS 连接；当前数据可能已过期'
   } finally {
-    state.loading = false
+    if (context === stateContext) state.loading = false
   }
 }
 
@@ -150,42 +174,40 @@ export function vmmStopPolling() {
   }
 }
 
-export async function vmmPowerOn(guestId: string) {
-  const res = await dsm.vmmGuestPowerOn(guestId)
-  if (res.success) {
-    ElMessage.success('开机指令已发送')
-  } else {
-    ElMessage.error('开机失败')
-  }
-  await vmmRefresh()
+export function vmmError(code?: number) {
+  const messages: Record<number, string> = { 102: 'VMM 接口不可用，请检查套件', 103: 'VMM 不支持此操作', 105: '当前账号没有操作权限', 106: '登录已过期', 401: '配置参数无效', 402: '操作失败，请检查虚拟机状态', 403: '虚拟机名称已存在', 600: '集群未就绪', 601: '主机离线', 902: 'CPU 资源不足', 903: '内存不足', 1600: '配置已修改，但 HA 资源预留失败，请在 VMM 检查' }
+  return messages[code ?? -1] || 'VMM 操作失败（code=' + code + '）'
 }
-
-export async function vmmShutdown(guestId: string) {
-  const res = await dsm.vmmGuestShutdown(guestId)
-  if (res.success) {
-    ElMessage.success('关机指令已发送')
-  } else {
-    ElMessage.error('关机失败')
-  }
-  await vmmRefresh()
+const busy = reactive<Record<string, boolean>>({})
+async function action(guestId: string, label: string, request: () => Promise<any>) {
+  if (busy[guestId]) return false
+  busy[guestId] = true
+  try {
+    const res = await request()
+    if (!res.success) throw new Error(vmmError(res.error?.code))
+    ElMessage.success(label + '指令已发送')
+    await vmmRefresh()
+    return true
+  } catch (error: any) { ElMessage.error(error?.message || label + '失败'); return false }
+  finally { delete busy[guestId] }
 }
-
-export async function vmmPowerOff(guestId: string) {
-  const res = await dsm.vmmGuestPowerOff(guestId)
-  if (res.success) {
-    ElMessage.warning('已强制关机')
-  } else {
-    ElMessage.error('强制关机失败')
-  }
-  await vmmRefresh()
-}
+export const vmmPowerOn = (id: string) => action(id, '开机', () => dsm.vmmGuestPowerOn(id))
+export const vmmShutdown = (id: string) => action(id, '关机', () => dsm.vmmGuestShutdown(id))
+export const vmmPowerOff = (id: string) => action(id, '强制关机', () => dsm.vmmGuestPowerOff(id))
+export const vmmSave = (id: string, settings: Parameters<typeof dsm.vmmGuestSet>[1]) => action(id, '保存配置', () => dsm.vmmGuestSet(id, settings))
 
 export function useVmm() {
+  resetContext()
+  onActivated(() => vmmStartPolling())
+  onDeactivated(vmmStopPolling)
   onScopeDispose(() => {
     vmmStopPolling()
   })
 
   return {
+    busy,
+    save: vmmSave,
+    reason: computed(() => state.reason),
     guests: vmmGuests,
     hosts: vmmHosts,
     storages: vmmStorages,

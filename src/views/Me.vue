@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { invoke } from '@tauri-apps/api/core'
 import { useAppStore } from '../stores/app'
@@ -61,6 +61,12 @@ onMounted(async () => {
   await refreshAll()
   timer = setInterval(refreshUtil, 5000)
 })
+
+onActivated(() => {
+  if (timer) clearInterval(timer)
+  timer = setInterval(refreshUtil, 5000)
+})
+onDeactivated(() => { if (timer) { clearInterval(timer); timer = null } })
 
 onUnmounted(() => {
   if (timer) clearInterval(timer)
@@ -232,7 +238,18 @@ async function logout() {
   router.replace('/servers')
 }
 
-function switchServer() {
+async function forgetPasswords() {
+  if (!await confirm('删除所有已保存密码？当前连接保持有效，下次登录需输入密码。', '删除凭据', { danger: true })) return
+  try { await app.forgetPasswords(); toast('已删除保存的密码', 'success') }
+  catch (e: any) { toast(String(e), 'error') }
+}
+
+async function switchServer() {
+  await invoke('clear_session')
+  dsm.sid = ''
+  dsm.dsSid = ''
+  dsm.account = ''
+  dsm.synoToken = ''
   router.replace('/servers')
 }
 
@@ -262,7 +279,7 @@ function onThemeSelect(_a: ActionSheetAction, idx: number) {
 
 <template>
   <!-- 桌面端 -->
-  <div v-if="!isMobile" class="page" v-loading="loading">
+  <div v-if="!isMobile" class="page ui-settings" v-loading="loading">
     <div class="profile">
       <div class="profile-left">
         <div class="avatar">
@@ -393,7 +410,8 @@ function onThemeSelect(_a: ActionSheetAction, idx: number) {
     </div>
 
     <div class="actions">
-      <el-button @click="switchServer" style="width: 100%">切换服务器</el-button>
+      <el-button @click="forgetPasswords">删除已保存密码</el-button>
+      <el-button @click="switchServer" style="width: 100%; margin-top: 8px">切换服务器</el-button>
       <el-button type="danger" @click="logout" style="width: 100%; margin-top: 8px">注销登录</el-button>
     </div>
   </div>
@@ -454,6 +472,7 @@ function onThemeSelect(_a: ActionSheetAction, idx: number) {
     <!-- 操作 -->
     <div class="m-group-title"><span>操作</span></div>
     <van-cell-group inset>
+      <van-cell title="删除已保存密码" is-link @click="forgetPasswords" />
       <van-cell title="切换服务器" is-link clickable @click="switchServer" />
       <van-cell title="注销登录" is-link clickable @click="logout" class="m-danger-cell" />
     </van-cell-group>
