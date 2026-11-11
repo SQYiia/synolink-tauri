@@ -1,3 +1,4 @@
+mod updater;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -219,11 +220,7 @@ async fn download_to_file(
     // 优先使用前端传入的保存目录，为空则回退系统默认 Downloads（iOS 无 Downloads，回退到 Documents）
     let dl_dir = match save_dir.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
         Some(s) => std::path::PathBuf::from(s),
-        None => app
-            .path()
-            .download_dir()
-            .or_else(|_| app.path().document_dir())
-            .map_err(|e| format!("download/document_dir: {}", e))?,
+        None => std::path::PathBuf::from(get_default_download_dir(app.clone())?),
     };
     if !dl_dir.exists() {
         std::fs::create_dir_all(&dl_dir).map_err(|e| format!("create dir: {}", e))?;
@@ -443,9 +440,7 @@ fn cancel_download(state: tauri::State<'_, AppState>, task_id: String) {
 
 #[tauri::command]
 fn get_default_download_dir(app: tauri::AppHandle) -> Result<String, String> {
-    let dir = app
-        .path()
-        .download_dir()
+    let dir = if cfg!(target_os = "android") { app.path().app_data_dir().map(|p| p.join("Downloads")) } else { app.path().download_dir() }
         .or_else(|_| app.path().document_dir())
         .map_err(|e| format!("download/document_dir: {}", e))?;
     Ok(dir.to_string_lossy().to_string())
@@ -457,9 +452,7 @@ fn get_default_download_dir(app: tauri::AppHandle) -> Result<String, String> {
 fn get_local_root_dir(app: tauri::AppHandle) -> Result<String, String> {
     // iOS / Android：用 Documents（沙盒可读写、文件 App 可见）
     // macOS / Win / Linux：优先 Documents（Tauri 的 download_dir 在某些环境不可靠）
-    let dir = app
-        .path()
-        .document_dir()
+    let dir = if cfg!(target_os = "android") { app.path().app_data_dir().map(|p| p.join("Downloads")) } else { app.path().document_dir() }
         .or_else(|_| app.path().download_dir())
         .map_err(|e| format!("local root dir: {}", e))?;
     if !dir.exists() {
@@ -988,12 +981,16 @@ fn dsm_protocol(
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState::default())
+        .manage(updater::UpdateState::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .register_asynchronous_uri_scheme_protocol("dsm", dsm_protocol)
         .invoke_handler(tauri::generate_handler![
+            updater::check_app_update,
+            updater::download_app_update,
+            updater::install_app_update,
             set_session,
             clear_session,
             save_password,

@@ -55,13 +55,16 @@ export async function confirm(
 ): Promise<boolean> {
   if (isMobile()) {
     try {
-      await showConfirmDialog({
+      const dialogOptions = {
+        // Package management uses an Element Plus dialog on mobile as well.
+        zIndex: 10000,
         title,
         message,
         confirmButtonText: opts.confirmText ?? '确定',
         cancelButtonText: opts.cancelText ?? '取消',
         confirmButtonColor: opts.danger ? '#EF4444' : undefined,
-      })
+      }
+      await showConfirmDialog(dialogOptions)
       return true
     } catch {
       return false

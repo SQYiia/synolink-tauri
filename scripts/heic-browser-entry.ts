@@ -40,9 +40,9 @@ export function showCachedCoverUnderLoad() {
   return () => { for (const done of releases) done(); app.unmount(); root.remove() }
 }
 
-export async function showWorkspace() {
+export async function showWorkspace(initialPhotoCount = 1) {
   dsm.sid = 'fixture'; dsm.baseUrl = 'https://nas'; dsm.account = 'alice'
-  let mediaCount = 1
+  let mediaCount = initialPhotoCount
   localStorage.setItem('album:folder:https://nas:alice','/photos')
   localStorage.setItem('video:folder:https://nas:alice','/videos')
   const scanAttempts = new Map<string,number>()
@@ -56,12 +56,13 @@ export async function showWorkspace() {
   const packageRows:any[]=[{id:'ContainerManager',name:'Container Manager',version:'24.0',additional:{status:'running',startable:true,description:'管理 NAS 上的容器服务'}},{id:'DownloadStation',name:'Download Station',version:'4.0',additional:{status:'running',startable:true}},{id:'HyperBackup',name:'Hyper Backup',version:'4.1',additional:{status:'running',startable:true}}]
   dsm.packageList=async()=>({success:true,data:{packages:packageRows}})
   dsm.packageFeasibility=async()=>({success:true,data:{}})
+  dsm.packageUninstall=async id=>{const index=packageRows.findIndex(p=>p.id===id);if(index>=0)packageRows.splice(index,1);return {success:true}}
   dsm.packageControl=async(id,action)=>{packageRows.find(p=>p.id===id).additional.status=action==='start'?'running':'stop';return {success:true}}
-  dsm.packageCatalog=async()=>({success:true,data:{packages:[{id:'DownloadStation',name:'Download Station',version:'4.1',link:'https://example.com/ds.spk',md5:'abc',size:1234},{id:'Demo',name:'演示套件',version:'1.0',link:'https://example.com/demo.spk',md5:'abc',size:1234}]}})
+  dsm.packageCatalog=async community=>({success:true,data:{packages:community?[{id:'CommunityDemo',name:'社区工具',description:'community search fixture',version:'1.0',link:'https://example.com/community.spk',md5:'abc',size:1234}]:[{id:'DownloadStation',name:'Download Station',version:'4.1',link:'https://example.com/ds.spk',md5:'abc',size:1234},{id:'Demo',name:'演示套件',version:'1.0',link:'https://example.com/demo.spk',md5:'abc',size:1234}]}})
   let selectedPackage=''
   dsm.packageDownload=async p=>{selectedPackage=p.id;return {success:true,data:{taskid:'task'}}}
   dsm.packageDownloadStatus=async()=>({success:true,data:{finished:true,progress:1}})
-  dsm.packageDownloadedInfo=async()=>({success:true,data:{id:selectedPackage,name:selectedPackage,version:selectedPackage==='Demo'?'1.0':'4.1',filename:'/volume1/@tmp/demo'}})
+  dsm.packageDownloadedInfo=async()=>({success:true,data:{id:selectedPackage,name:selectedPackage,version:selectedPackage==='DownloadStation'?'4.1':'1.0',filename:'/volume1/@tmp/demo',install_pages:[],licence:''}})
   dsm.packageCheck=async()=>({success:true,data:{volume_path:'/volume1',volume_list:[{mount_point:'/volume1',display:'存储卷 1'}]}})
   dsm.packageInstall=async info=>{const found=packageRows.find(p=>p.id===info.id);if(found)found.version=info.version;else packageRows.push({...info,additional:{status:'running',startable:true}});return {success:true,data:{}}}
   const feedRows:any[]=[]

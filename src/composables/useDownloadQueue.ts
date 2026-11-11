@@ -7,7 +7,7 @@ import { ElMessage, ElNotification } from 'element-plus'
 import { showToast } from 'vant'
 import { h } from 'vue'
 import { dsm } from '../api/dsm'
-import { isIOS } from '../utils/platform'
+import { isMobileUA } from '../utils/platform'
 
 export interface DownloadTask {
   id: string
@@ -52,7 +52,7 @@ export const downloadDir = ref<string>(localStorage.getItem(LS_KEY_SAVE_DIR) || 
 const LS_KEY_ASK_EVERY = 'synolink.askEveryDownload'
 const _savedAskEvery = typeof localStorage !== 'undefined' ? localStorage.getItem(LS_KEY_ASK_EVERY) : null
 export const askEveryDownload = ref<boolean>(
-  _savedAskEvery === null ? !isIOS : _savedAskEvery !== '0'
+  _savedAskEvery === null ? !isMobileUA : _savedAskEvery !== '0'
 )
 export function setAskEveryDownload(on: boolean) {
   askEveryDownload.value = on
@@ -91,7 +91,7 @@ export function resolveLocalPicker(path: string | null) {
  *  - 移动端 (iOS/Android)：in-app LocalFolderPicker（沙盒 Documents 内浏览/新建）
  *    因为 tauri-plugin-dialog v2 在 iOS 上 directory:true 直接返回 FolderPickerNotImplemented */
 export async function chooseDownloadDir(): Promise<string | null> {
-  if (isIOS) {
+  if (isMobileUA) {
     return new Promise<string | null>((resolve) => {
       localPickerResolver = resolve
       localPickerOpen.value = true
@@ -132,7 +132,7 @@ export async function resetDownloadDir() {
 /** 打开文件所在目录并高亮选中。某些平台仅能打开目录不能高亮。
  *  iOS 无文件管理器概念，提示用户文件在 App 容器内即可。 */
 export async function revealSavedFile(savePath: string) {
-  if (isIOS) {
+  if (isMobileUA) {
     showToast({ message: '文件已保存到 App 内\n' + savePath, duration: 3000 })
     return
   }
@@ -181,7 +181,7 @@ async function doSetupListeners() {
       t.status = 'done'
       t.savePath = e.payload.savePath
       if (t.size > 0) t.loaded = t.size
-      if (isIOS) {
+      if (isMobileUA) {
         showToast({ message: `下载完成：${t.name}`, duration: 2200 })
       } else {
         ElNotification({
@@ -231,7 +231,7 @@ export async function enqueue(path: string, name: string, size: number = 0, save
   const id = crypto.randomUUID()
   const task: DownloadTask = { id, sourceUrl, sourceAccount, path, name, size, loaded: 0, status: 'queued', saveDir: effectiveDir }
   state.tasks.unshift(task)
-  if (isIOS) {
+  if (isMobileUA) {
     showToast({ message: `已加入下载队列：${name}`, duration: 1800 })
   } else {
     ElMessage({

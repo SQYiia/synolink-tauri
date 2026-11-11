@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isAndroid } from '../utils/platform'
 import { ref, shallowRef, onMounted, onBeforeUnmount } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { dsm } from '../api/dsm'
@@ -6,7 +7,7 @@ import { JellyfinClient } from '../api/jellyfin'
 import JellyfinPoster from './JellyfinPoster.vue'
 const scope = JSON.stringify([dsm.baseUrl, dsm.account])
 const key = 'jellyfin:' + scope
-const address = ref(''), username = ref(''), password = ref(''), remember = ref(true)
+const address = ref(''), username = ref(''), password = ref(''), remember = ref(!isAndroid)
 const client = shallowRef<JellyfinClient>(); const items = ref<any[]>([]), total = ref(0), busy = ref(false), error = ref(''), search = ref('')
 const trail = ref<{id:string;name:string}[]>([]), selected = ref<any>(), detailOpen = ref(false), settings = ref(true)
 let generation = 0
@@ -26,7 +27,7 @@ async function connect() {
   const c = new JellyfinClient(address.value); await c.login(username.value.trim(),password.value)
   if(!valid(gen)) return
   if(remember.value) await invoke('save_password',{accountId:key,password:JSON.stringify({token:c.token,userId:c.userId,base:c.base})})
-  else await invoke('delete_password',{accountId:key})
+  else if (!isAndroid) await invoke('delete_password',{accountId:key})
   localStorage.setItem(key,JSON.stringify({base:c.base,username:username.value,remember:remember.value}))
   password.value = ''; client.value = c; settings.value = false; trail.value = []; items.value = []
  } catch(e) { if(valid(gen)) error.value = e instanceof Error ? e.message : String(e) }
@@ -35,7 +36,7 @@ async function connect() {
 }
 async function disconnect() {
  generation++; busy.value = false; client.value = undefined; items.value = []; selected.value = undefined; detailOpen.value = false; settings.value = true
- try { await invoke('delete_password',{accountId:key}); localStorage.removeItem(key) } catch { error.value = '删除保存的连接失败，请重试' }
+ try { if (!isAndroid) await invoke('delete_password',{accountId:key}); localStorage.removeItem(key) } catch { error.value = '删除保存的连接失败，请重试' }
 }
 async function open(item:any) {
  if(busy.value) return
@@ -50,8 +51,8 @@ onMounted(async () => {
  const gen = generation
  try {
   const config = JSON.parse(localStorage.getItem(key) || 'null'); if(!config) return
-  address.value = config.base; username.value = config.username; remember.value = config.remember
-  if(!config.remember) return
+  address.value = config.base; username.value = config.username; remember.value = !isAndroid && config.remember
+  if(!remember.value) return
   const secret = await invoke<string|null>('read_password',{accountId:key}); if(!secret || !valid(gen)) return
   const saved = JSON.parse(secret); if(saved.base !== config.base) return
   const c = new JellyfinClient(config.base); c.token = saved.token; c.userId = saved.userId; client.value = c; settings.value = false; await load()
@@ -67,7 +68,7 @@ onBeforeUnmount(() => { generation++; clearInterval(contextTimer) })
   <h3>连接 Jellyfin</h3><p>填写 Jellyfin 服务地址（如 http://NAS地址:8096），使用 Jellyfin 账号登录。</p>
   <el-input v-model="address" aria-label="Jellyfin 服务地址" placeholder="http://192.168.1.10:8096" :disabled="busy" />
   <div class="credentials"><el-input v-model="username" aria-label="Jellyfin 用户名" placeholder="用户名" :disabled="busy" /><el-input v-model="password" type="password" show-password aria-label="Jellyfin 密码" placeholder="密码" :disabled="busy" /></div>
-  <el-checkbox v-model="remember">记住连接（令牌保存在系统凭据库）</el-checkbox><div><el-button type="primary" native-type="submit" :loading="busy">连接媒体库</el-button><el-button v-if="client" :disabled="busy" @click="disconnect">断开并忘记连接</el-button></div>
+  <el-checkbox v-if="!isAndroid" v-model="remember">记住连接（令牌保存在系统凭据库）</el-checkbox><div><el-button type="primary" native-type="submit" :loading="busy">连接媒体库</el-button><el-button v-if="client" :disabled="busy" @click="disconnect">断开并忘记连接</el-button></div>
  </form>
  <div v-if="error" class="notice" role="alert">{{ error }}</div>
  <template v-if="client && !settings">

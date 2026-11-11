@@ -199,3 +199,17 @@ NAS 文件模式自动读取同目录的同名 .nfo（movie / tvshow / episodede
 接口参数核对来源：用户 NAS 的 /webman/modules/PkgManApp/PkgManApp.js（只读获取）与 N4S4/synology-api 的 core_package.py。安装保留签名与依赖检查，不强制安装；存在自定义安装/卸载向导、许可确认、重启或依赖替换时，明确提示在 DSM 完成。依赖不自动安装，不跳过风险确认。网络中断或超时不视为成功，NAS 可能继续执行，需刷新核实后再试。修改套件和套件源通常需要 NAS 管理员权限。Docker 镜像更新不属于 SPK 管理。
 
 验证：58 项 Node 测试、类型检查及构建；浏览器模拟套件启停、下载、安装、更新、来源增删改与自动更新策略。未对真实 NAS 执行安装、更新、卸载等写操作，实际 DSM 版本兼容性待用户验证。
+
+## 软件更新（Windows x64，0.1.16 起）
+
+启动 5 秒后自动检查 GitHub Releases 最新稳定版，此后每 6 小时检查一次；在「我的」中可以关闭自动检查或手动检查。发现新版本时显示通知，下载和安装均由用户操作。下载失败可重试，已完成的安装包会复用并重新校验。有未完成的传输或文件操作时禁止退出安装。
+
+更新源固定为 `SQYiia/synolink-tauri`，采用 HTTPS 和 GitHub 资产 SHA256 digest 校验；这属于完整性校验，并非发行者代码签名。安装前再次校验，随后打开 Windows 安装向导并退出应用，安装完成后重新启动。0.1.15 及更早版本需要先手动安装 0.1.16。
+
+发布新版本需同步 package.json、package-lock.json、Cargo.toml、Cargo.lock、tauri.conf.json 的版本，以 `v版本号` 发布正式 Release，并上传 `SynoLink_版本号_x64-setup.exe`；GitHub API 必须返回该资产的 `sha256:` digest。草稿、预发布、相同或更低版本不会触发更新。当前不包含 macOS/iOS 自动安装。
+
+验证：`npm test`、`npm run test:updater`、`cargo test --manifest-path src-tauri/Cargo.toml`。更新浏览器测试模拟 GitHub 返回及安装调用，不启动实际安装器。
+
+## Android
+
+支持构建 ARM64 安卓安装包，最低 Android 7.0。手机界面、媒体代理和应用内下载目录已适配。构建、签名、验证方式及当前限制见 [Android 说明](doc/ANDROID.md)。

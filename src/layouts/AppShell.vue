@@ -625,4 +625,10 @@ function onTabChange(i: number) {
 }
 .m-dl-meta { font-size: 12px; color: hsl(var(--muted-foreground)); margin-top: 2px; }
 .m-dl-error { color: hsl(var(--destructive)); }
+
+.m-shell :deep(.van-tabbar-item__icon) { padding: 2px 13px; border-radius: 14px; margin-bottom: 2px; }
+.m-shell :deep(.van-tabbar-item--active .van-tabbar-item__icon) { background: var(--el-color-primary-light-9); color: var(--el-color-primary); }
+.m-shell :deep(.van-tabbar-item--active .van-tabbar-item__text) { color: var(--el-color-primary); font-weight: 600; }
+.m-navbar-actions { gap: 6px; }
+.m-navbar-btn { border-radius: 12px; background: var(--el-fill-color-light); }
 </style>

@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onActivated, onDeactivated, onBeforeUnmount } from 'vue'
+import { useIsMobile } from '../composables/useIsMobile'
 import { dsm } from '../api/dsm'
-import { packageResult, newerPackage, installationBlock } from '../utils/packageManagement'
+import { packageResult, newerPackage, installationBlock, hasPackageOption, packageMatches } from '../utils/packageManagement'
 import { confirm } from '../utils/feedback'
+const isMobile = useIsMobile()
+const sourceFilter = ref('all')
 const props=defineProps<{installed:any[];capabilities:Record<string,any>}>()
 const emit=defineEmits<{changed:[]}>()
 const open=ref(false),tab=ref('catalog'),query=ref(''),catalog=ref<any[]>([]),feeds=ref<any[]>([]),busy=ref(false),error=ref(''),notice=ref(''),phase=ref(''),progress=ref(0)
@@ -16,15 +19,34 @@ let generation=0, active=true
 const scope=()=>JSON.stringify([dsm.baseUrl,dsm.account])
 let context=scope()
 function valid(g:number,c:string){return active && generation===g && scope()===c && context===c}
-const matching=computed(()=>catalog.value.filter(p=>(String(p.name||p.dname||p.id)).toLowerCase().includes(query.value.toLowerCase())))
+const matching = computed(() => catalog.value.filter(p => (sourceFilter.value === 'all' || p.sourceKind === sourceFilter.value) && packageMatches(p, query.value)))
 function existing(p:any){return props.installed.find(i=>i.id===p.id)}
 function update(p:any){return !!existing(p)&&newerPackage(String(p.version),existing(p).version)}
-async function show(){open.value=true;if(!catalog.value.length)await refresh()}
+async function show(source = 'all') {
+ open.value = true
+ tab.value = 'catalog'
+ sourceFilter.value = source
+ query.value = ''
+ if (!catalog.value.length) await refresh()
+}
+async function showCatalog(source = 'all') {
+ tab.value = 'catalog'
+ sourceFilter.value = source
+ if (!catalog.value.length) await refresh()
+}
+async function useCommunitySource() {
+ await loadFeeds()
+ if (busy.value || error.value) return
+ const present = feeds.value.find(f => String(f.feed || '').replace(/\/$/, '') === 'https://packages.synocommunity.com')
+ feedName.value = present?.name || 'SynoCommunity'
+ feedUrl.value = 'https://packages.synocommunity.com'
+ originalFeed.value = present?.feed || ''
+}
 async function refresh(){
  if(busy.value)return
  const g=++generation,c=scope();busy.value=true;error.value=''
  if(context!==c){catalog.value=[];feeds.value=[];prepared.value=undefined;context=c}
- try{const results=await Promise.allSettled([dsm.packageCatalog(false),dsm.packageCatalog(true)]);if(!valid(g,c))return;const rows=new Map<string,any>(),failures:string[]=[];results.forEach((r,i)=>{try{if(r.status==='rejected')throw r.reason;const data=packageResult(r.value);if(!Array.isArray(data.packages))throw Error('无法识别套件目录');for(const pkg of data.packages)if(!rows.has(pkg.id))rows.set(pkg.id,{...pkg,source:i?'第三方来源':'群晖来源'})}catch(e){failures.push((i?'第三方来源':'群晖来源')+'：'+(e instanceof Error?e.message:String(e)))}});catalog.value=[...rows.values()];error.value=failures.join('；')}catch(e){if(valid(g,c))error.value=e instanceof Error?e.message:String(e)}finally{if(g===generation)busy.value=false}
+ try{const results=await Promise.allSettled([dsm.packageCatalog(false),dsm.packageCatalog(true)]);if(!valid(g,c))return;const rows=new Map<string,any>(),failures:string[]=[];results.forEach((r,i)=>{try{if(r.status==='rejected')throw r.reason;const data=packageResult(r.value);if(!Array.isArray(data.packages))throw Error('无法识别套件目录');for(const pkg of data.packages)if(!rows.has(pkg.id+'|'+pkg.version+'|'+pkg.link))rows.set(pkg.id+'|'+pkg.version+'|'+pkg.link,{...pkg,sourceKind:i?'community':'official',source:i?'第三方来源':'群晖来源'})}catch(e){failures.push((i?'第三方来源':'群晖来源')+'：'+(e instanceof Error?e.message:String(e)))}});catalog.value=[...rows.values()];error.value=failures.join('；')}catch(e){if(valid(g,c))error.value=e instanceof Error?e.message:String(e)}finally{if(g===generation)busy.value=false}
 }
 async function loadFeeds(){
  tab.value='feeds';if(busy.value)return
@@ -37,7 +59,7 @@ async function prepare(info:any,id:string,g:number,c:string){
  packageResult(await dsm.packageFeasibility(info.id,'install'));if(!valid(g,c))return
  const checked=packageResult(await dsm.packageCheck(info));if(!valid(g,c))return
  prepared.value=info;upgrade.value=installed;task.value=id;volumes.value=checked.volume_list||[];volume.value=checked.volume_path||'';block.value=installationBlock(info,checked);phase.value='已完成检查，请确认安装信息'
- if(info.licence || info.additional?.licence)block.value='此套件需要阅读并接受许可协议，请在 DSM 套件中心完成安装'
+ if(hasPackageOption(info.licence) || hasPackageOption(info.additional?.licence))block.value='此套件需要阅读并接受许可协议，请在 DSM 套件中心完成安装'
 }
 async function download(p:any){
  if(busy.value||context!==scope())return
@@ -52,7 +74,7 @@ async function download(p:any){
   for(let i=0;i<300;i++){
    const status=packageResult(await dsm.packageDownloadStatus(id));if(!valid(g,c))return
    progress.value=Math.max(0,Math.min(100,Number(status.progress||0)*100))
-   if(status.finished===true){done=true;break}
+   if([true, 1, 'true', '1'].includes(status.finished)){done=true;break}
    await new Promise(r=>setTimeout(r,1000));if(!valid(g,c))return
   }
   if(!done)throw Error('下载等待超时，请在 NAS 套件中心检查任务')
@@ -101,7 +123,7 @@ async function saveFeed(){
  if(busy.value||context!==scope())return
  const g=++generation,c=scope();busy.value=true;error.value='';let saved=false
  try{packageResult(await dsm.packageFeedSave(feedName.value,feedUrl.value,originalFeed.value||undefined));if(!valid(g,c))return;feedName.value='';feedUrl.value='';originalFeed.value='';catalog.value=[];notice.value='套件源已保存';saved=true}catch(e){if(valid(g,c))error.value=e instanceof Error?e.message:String(e)}finally{if(g===generation)busy.value=false}
- if(saved&&valid(g,c))await loadFeeds()
+ if(saved&&valid(g,c)){await refresh();await loadFeeds()}
 }
 async function deleteFeed(feed:string){
  if(busy.value)return
@@ -118,16 +140,20 @@ onDeactivated(leave)
 onBeforeUnmount(leave)
 </script>
 <template>
-<div class="package-center-actions"><el-button :disabled="!capabilities['SYNO.Core.Package.Server']" @click="show">安装 / 更新套件</el-button></div>
-<el-dialog v-model="open" title="套件中心" width="min(1000px,96vw)" :close-on-click-modal="!busy" :close-on-press-escape="!busy" :show-close="!busy" append-to-body>
- <div class="center-tabs"><el-button :disabled="busy" @click="tab='catalog';if(!catalog.length)refresh()">在线套件</el-button><el-button :disabled="busy||!capabilities['SYNO.Core.Package.Feed']" @click="loadFeeds">第三方套件源</el-button><el-button :disabled="busy||!capabilities['SYNO.Core.Package.Setting']" @click="loadSettings">自动更新</el-button><label class="upload">上传 SPK<input type="file" accept=".spk" :disabled="busy||!capabilities['SYNO.Core.Package.Installation']" @change="upload"></label></div>
+<div class="package-center-actions"><el-button type="primary" :disabled="!capabilities['SYNO.Core.Package.Server']" @click="show()">安装 / 更新套件</el-button><el-button :disabled="!capabilities['SYNO.Core.Package.Server']" @click="show('community')">搜索第三方套件</el-button></div>
+<el-dialog v-model="open" class="package-dialog" :fullscreen="isMobile" title="套件中心" width="min(1000px,96vw)" :close-on-click-modal="!busy" :close-on-press-escape="!busy" :show-close="!busy" append-to-body>
+ <div class="center-tabs"><el-button :disabled="busy" @click="showCatalog()">在线套件</el-button><el-button :disabled="busy" @click="showCatalog('community')" data-community-tab="true">第三方套件</el-button><el-button :disabled="busy||!capabilities['SYNO.Core.Package.Feed']" @click="loadFeeds">第三方套件源</el-button><el-button :disabled="busy||!capabilities['SYNO.Core.Package.Setting']" @click="loadSettings">自动更新</el-button><label class="upload">上传 SPK<input type="file" accept=".spk" :disabled="busy||!capabilities['SYNO.Core.Package.Installation']" @change="upload"></label></div>
  <el-alert v-if="error" :title="error" type="error" :closable="false"/><el-alert v-if="notice" :title="notice" type="info" :closable="false"/>
  <div v-if="pendingUpdates.length" class="phase">队列中还有 {{ pendingUpdates.length }} 个更新，每项均需确认。<el-button :disabled="busy||!!prepared" @click="nextUpdate">准备下一个</el-button><el-button :disabled="busy" @click="pendingUpdates=[]">清空队列</el-button></div>
  <div v-if="phase" class="phase" role="status">{{ phase }}<el-progress v-if="phase==='正在下载到 NAS'" :percentage="Math.round(progress)"/></div>
  <section v-if="prepared" class="prepared"><h3>{{ prepared.name || prepared.id }} <small>{{ prepared.version }}</small></h3><p>{{ prepared.description || prepared.additional?.description }}</p><p>维护者：{{ prepared.maintainer || prepared.additional?.maintainer || '未提供' }}</p><p>{{ upgrade ? '更新已安装套件' : '新安装' }} · 保留 DSM 的签名和依赖检查</p><el-select v-if="!upgrade" v-model="volume" placeholder="选择安装存储卷" :disabled="busy"><el-option v-for="v in volumes" :key="v.mount_point" :value="v.mount_point" :label="v.display || v.mount_point"/></el-select><el-alert v-if="block" :title="block" type="warning" :closable="false"/><el-button type="primary" :loading="installing" :disabled="busy||!!block||(!upgrade&&!volume)" @click="install">{{ upgrade?'确认更新':'确认安装' }}</el-button><el-button :disabled="busy" @click="prepared=undefined;phase=''">关闭安装信息</el-button></section>
- <template v-if="tab==='catalog'"><div class="catalog-toolbar"><el-input v-model="query" placeholder="搜索官方和已配置来源的套件"/><el-button :loading="busy" @click="refresh">检查更新</el-button><el-button :disabled="busy||!!prepared||!catalog.some(update)" @click="batchUpdate">逐项更新</el-button></div><div class="catalog"><article v-for="p in matching" :key="p.id+'-'+p.version"><div><strong>{{ p.name || p.dname || p.id }}</strong><p>{{ p.version }} · {{ p.source }} <span v-if="existing(p)"> · 已安装 {{ existing(p).version }}</span></p><p>{{ p.description || p.desc || p.id }}</p></div><el-button :disabled="busy||!p.link||!capabilities['SYNO.Core.Package.Installation']||(!!existing(p)&&!update(p))" @click="download(p)">{{ existing(p) ? update(p)?'下载更新':'已安装':'下载安装' }}</el-button></article></div><el-empty v-if="!matching.length&&!busy" description="暂无可用套件，或来源暂时无法访问"/></template>
- <template v-else-if="tab==='feeds'"><p>管理 DSM 第三方套件源。保存后检查在线套件目录，即可查看该来源提供的兼容套件。</p><form class="feed-form" @submit.prevent="saveFeed"><el-input v-model="feedName" aria-label="套件源名称" placeholder="来源名称" :disabled="busy"/><el-input v-model="feedUrl" aria-label="套件源地址" placeholder="https://packages.example.com" :disabled="busy"/><el-button native-type="submit" :disabled="busy||!feedName||!feedUrl">{{ originalFeed ? '保存修改' : '添加来源' }}</el-button><el-button v-if="originalFeed" :disabled="busy" @click="originalFeed='';feedName='';feedUrl=''">取消编辑</el-button></form><div v-for="(f,i) in feeds" :key="i" class="feed"><strong>{{ f.name || f.title }}</strong><span>{{ f.feed || f.url || f.link }}</span><el-button :disabled="busy" @click="feedName=f.name;feedUrl=f.feed;originalFeed=f.feed">编辑</el-button><el-button :disabled="busy" @click="deleteFeed(f.feed)">删除</el-button></div><el-empty v-if="!feeds.length&&!busy" description="没有返回第三方套件源"/></template>
+ <template v-if="tab==='catalog'"><el-radio-group v-model="sourceFilter" class="source-filter"><el-radio-button value="all">全部</el-radio-button><el-radio-button value="official">官方</el-radio-button><el-radio-button value="community">第三方</el-radio-button></el-radio-group><div class="catalog-toolbar"><el-input v-model="query" aria-label="搜索在线套件" clearable placeholder="搜索名称、套件 ID 或描述"/><el-button :loading="busy" @click="refresh">检查更新</el-button><el-button :disabled="busy||!!prepared||!catalog.some(update)" @click="batchUpdate">逐项更新</el-button></div><div class="catalog"><article v-for="p in matching" :key="p.id+'-'+p.version+'-'+p.link"><div><strong>{{ p.name || p.dname || p.id }}</strong><p>{{ p.version }} · {{ p.source }} <span v-if="existing(p)"> · 已安装 {{ existing(p).version }}</span></p><p>{{ p.description || p.desc || p.id }}</p></div><el-button :disabled="busy||!p.link||!capabilities['SYNO.Core.Package.Installation']||(!!existing(p)&&!update(p))" @click="download(p)">{{ existing(p) ? update(p)?'下载更新':'已安装':'下载安装' }}</el-button></article></div><el-empty v-if="!matching.length&&!busy" :description="query ? '没有匹配的套件，请尝试名称或 ID' : sourceFilter==='community' ? '暂无兼容的第三方套件，请添加套件源后刷新' : '暂无可用套件'"><el-button v-if="sourceFilter==='community'" :disabled="busy||!capabilities['SYNO.Core.Package.Feed']" @click="loadFeeds">管理套件源</el-button></el-empty></template>
+ <template v-else-if="tab==='feeds'"><el-button :disabled="busy" @click="useCommunitySource">填入 SynoCommunity 来源</el-button><p>管理 DSM 第三方套件源。保存后检查在线套件目录，即可查看该来源提供的兼容套件。</p><form class="feed-form" @submit.prevent="saveFeed"><el-input v-model="feedName" aria-label="套件源名称" placeholder="来源名称" :disabled="busy"/><el-input v-model="feedUrl" aria-label="套件源地址" placeholder="https://packages.example.com" :disabled="busy"/><el-button native-type="submit" :disabled="busy||!feedName||!feedUrl">{{ originalFeed ? '保存修改' : '添加来源' }}</el-button><el-button v-if="originalFeed" :disabled="busy" @click="originalFeed='';feedName='';feedUrl=''">取消编辑</el-button></form><div v-for="(f,i) in feeds" :key="i" class="feed"><strong>{{ f.name || f.title }}</strong><span>{{ f.feed || f.url || f.link }}</span><el-button :disabled="busy" @click="feedName=f.name;feedUrl=f.feed;originalFeed=f.feed">编辑</el-button><el-button :disabled="busy" @click="deleteFeed(f.feed)">删除</el-button></div><el-empty v-if="!feeds.length&&!busy" description="没有返回第三方套件源"/></template>
 <section v-if="tab==='settings'"><h3>NAS 套件自动更新</h3><p>由 NAS 执行，关闭 SynoLink 后仍然生效。</p><el-radio-group v-model="updateMode" :disabled="busy||!settingsReady"><el-radio value="disabled">关闭自动更新</el-radio><el-radio value="important">仅重要更新</el-radio><el-radio value="all">所有套件最新版本</el-radio><el-radio v-if="updateMode==='custom'" value="custom">当前为 DSM 自定义策略</el-radio></el-radio-group><p><el-button type="primary" :disabled="busy||!settingsReady||updateMode==='custom'" @click="saveSettings">保存策略</el-button></p></section>
 </el-dialog>
 </template>
-<style scoped>.feed-form{display:flex;flex-wrap:wrap;gap:10px;margin:20px 0}.feed-form .el-input{max-width:300px}.package-center-actions{margin:18px 0}.center-tabs,.catalog-toolbar{display:flex;gap:12px;margin:16px 0;align-items:center}.upload{padding:8px 12px;border:1px solid var(--el-border-color);border-radius:8px;font-size:13px;cursor:pointer}.upload input{display:none}.catalog{max-height:50vh;overflow:auto}.catalog article{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 0;border-bottom:1px solid var(--el-border-color-lighter)}.catalog p{font-size:12px;color:var(--el-text-color-secondary);max-width:650px}.prepared{padding:20px;background:var(--el-fill-color-light);border-radius:12px;margin:16px 0}.prepared .el-button,.prepared .el-alert{margin-top:12px}.phase{padding:14px 0}.feed{padding:16px;border-bottom:1px solid var(--el-border-color-lighter)}.feed span{display:block;overflow-wrap:anywhere;margin-top:8px;color:var(--el-text-color-secondary)}.catalog-toolbar .el-input{max-width:500px}</style>
+<style scoped>.feed-form{display:flex;flex-wrap:wrap;gap:10px;margin:20px 0}.feed-form .el-input{max-width:300px}.package-center-actions{margin:18px 0}.center-tabs,.catalog-toolbar{display:flex;gap:12px;margin:16px 0;align-items:center}.upload{padding:8px 12px;border:1px solid var(--el-border-color);border-radius:8px;font-size:13px;cursor:pointer}.upload input{display:none}.catalog{max-height:50vh;overflow:auto}.catalog article{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 0;border-bottom:1px solid var(--el-border-color-lighter)}.catalog p{font-size:12px;color:var(--el-text-color-secondary);max-width:650px}.prepared{padding:20px;background:var(--el-fill-color-light);border-radius:12px;margin:16px 0}.prepared .el-button,.prepared .el-alert{margin-top:12px}.phase{padding:14px 0}.feed{padding:16px;border-bottom:1px solid var(--el-border-color-lighter)}.feed span{display:block;overflow-wrap:anywhere;margin-top:8px;color:var(--el-text-color-secondary)}.catalog-toolbar .el-input{max-width:500px}
+.package-center-actions{display:flex;flex-wrap:wrap;gap:10px}.package-center-actions .el-button{margin:0}
+.center-tabs,.catalog-toolbar{flex-wrap:wrap}.center-tabs .el-button,.catalog-toolbar .el-button{margin:0}.catalog article>div{min-width:0}.catalog article>button{flex-shrink:0}.catalog p{overflow-wrap:anywhere}
+@media(max-width:640px){.catalog{max-height:none}.catalog-toolbar .el-input{max-width:none;flex-basis:100%}.center-tabs{gap:8px}.prepared{padding:14px}.catalog article{gap:10px}.feed-form .el-input{max-width:none}.source-filter{margin-top:8px}.catalog article strong{overflow-wrap:anywhere}}
+</style>

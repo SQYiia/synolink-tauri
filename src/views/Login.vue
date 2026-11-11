@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isAndroid } from '../utils/platform'
 import { invoke } from '@tauri-apps/api/core'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -53,7 +54,7 @@ onMounted(async () => {
   if (last) {
     form.account = last.account
     form.passwd = last.password
-    rememberPassword.value = !!last.rememberPassword
+    rememberPassword.value = !isAndroid && !!last.rememberPassword
   }
 })
 
@@ -166,7 +167,7 @@ function back() {
           <el-form-item label="密码">
             <el-input v-model="form.passwd" type="password" show-password autocomplete="current-password" placeholder="DSM 密码" size="large" />
           </el-form-item>
-          <el-checkbox v-model="rememberPassword">在系统凭据库保存密码</el-checkbox>
+          <el-checkbox v-if="!isAndroid" v-model="rememberPassword">在系统凭据库保存密码</el-checkbox>
           <el-button type="primary" :loading="loading" size="large" style="width: 100%; margin-top: 8px;" @click="submit">登录</el-button>
         </el-form>
       </div>
@@ -199,7 +200,8 @@ function back() {
         />
       </van-cell-group>
 
-      <van-checkbox v-model="rememberPassword" style="margin-top: 16px">安全保存密码</van-checkbox>
+      <van-checkbox v-if="!isAndroid" v-model="rememberPassword" style="margin-top: 16px">安全保存密码</van-checkbox>
+      <p v-if="isAndroid" style="font-size:12px;color:var(--van-text-color-2)">安卓版当前仅在本次运行期间保留密码。</p>
       <div class="m-login-actions">
         <van-button type="primary" block round :loading="loading" @click="submit">登录</van-button>
       </div>

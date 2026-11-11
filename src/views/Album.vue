@@ -32,8 +32,7 @@ const {
   visibleInit: 120,
   visibleStep: 120,
   storageKeyPrefix: 'album:folder',
-  sortBy: 'crtime',
-  sortDirection: 'desc',
+  firstPagePreview: 48,
 })
 
 const viewerOpen = ref(false)
@@ -51,8 +50,8 @@ let rafId: number | null = null
 let resizeObserver: ResizeObserver | null = null
 
 const GAP = 4
-const HEADER_HEIGHT = 32
-const BUFFER = 1000
+const HEADER_HEIGHT = 40
+const BUFFER = computed(() => isMobile.value ? cellSize.value * 2 : 800)
 
 // 移动端用更小的格子
 const MIN_COL_WIDTH = computed(() => isMobile.value ? 110 : 140)
@@ -171,11 +170,18 @@ const totalHeight = computed(() => {
 })
 
 const visibleSegments = computed(() => {
-  const top = scrollTop.value - BUFFER
-  const bottom = scrollTop.value + viewportHeight.value + BUFFER
-  return segments.value.filter(
-    (s) => s.offset + s.height > top && s.offset < bottom,
-  )
+  const top = scrollTop.value - BUFFER.value
+  const bottom = scrollTop.value + viewportHeight.value + BUFFER.value
+  const rows = segments.value
+  let lo = 0, hi = rows.length
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1
+    if (rows[mid].offset + rows[mid].height <= top) lo = mid + 1
+    else hi = mid
+  }
+  let end = lo
+  while (end < rows.length && rows[end].offset < bottom) end++
+  return rows.slice(lo, end)
 })
 
 const headerSegs = computed(() =>
@@ -310,7 +316,7 @@ watch([mPreviewOpen, mPreviewIndex, previewPhotos, mPreviewRetry], async () => {
 function openPhoto(p: any) {
   const idx = flatPhotos.value.findIndex((x) => x.path === p.path)
   if (idx < 0) return
-  previewPhotos.value = [...flatPhotos.value]
+  previewPhotos.value = flatPhotos.value
   if (isMobile.value) {
 
     mPreviewStart.value = idx
@@ -460,9 +466,9 @@ useBackHandler(() => {
 
 
         <div
-          v-if="floatingDate && floatingDateVisible && flatPhotos.length > 0"
+          v-if="floatingDate && floatingDateVisible && scrollTop > HEADER_HEIGHT"
           class="floating-date"
-        >{{ floatingDate }}</div>
+        ><span>{{ floatingDate }}</span></div>
 
         <div class="virtual-spacer" :style="{ height: totalHeight + 'px' }">
           <template v-for="seg in visibleSegments" :key="seg.key">
@@ -516,16 +522,14 @@ useBackHandler(() => {
 
   <!-- 移动端 -->
   <div v-else class="m-album">
-    <div class="m-album-head">
-      <div class="m-album-folder" @click="pickerOpen = true">
-        <van-icon name="folder-o" size="18" />
-        <span class="m-album-folder-text">{{ folder || '选择相册目录' }}</span>
-        <van-icon name="arrow-down" size="14" />
+    <header class="m-album-head">
+      <div class="album-heading"><h2>照片</h2><span v-if="folder">{{ photos.length.toLocaleString() }} 张</span></div>
+      <div class="album-tools">
+        <button class="album-source" @click="pickerOpen = true" :title="folder"><van-icon name="folder-o" /><span>{{ folder || '选择目录' }}</span><van-icon name="arrow-down" /></button>
+        <button v-if="folder" class="album-refresh" :disabled="loading" @click="scan" aria-label="刷新相册"><van-loading v-if="loading" size="16" /><van-icon v-else name="replay" /></button>
       </div>
-      <span v-if="folder && photos.length" class="m-album-count">{{ photos.length }} 张</span>
-    </div>
-
-    <div v-if="loading" class="scan-status" role="status">正在更新相册，已发现 {{ photos.length }} 张，已有照片可继续浏览…</div>
+    </header>
+    <div v-if="loading && !photos.length" class="scan-status" role="status">正在读取照片…</div>
     <div v-if="scanError" class="scan-status" role="alert">{{ scanError }} <button @click="scan">重试扫描</button></div>
     <main ref="scrollEl" class="m-album-body" @scroll="onScroll">
       <van-empty v-if="!folder" image="search" description="请选择要浏览的图片目录">
@@ -537,9 +541,9 @@ useBackHandler(() => {
 
 
         <div
-          v-if="floatingDate && floatingDateVisible && flatPhotos.length > 0"
+          v-if="floatingDate && floatingDateVisible && scrollTop > HEADER_HEIGHT"
           class="floating-date"
-        >{{ floatingDate }}</div>
+        ><span>{{ floatingDate }}</span></div>
 
         <div class="virtual-spacer" :style="{ height: totalHeight + 'px' }">
           <template v-for="seg in visibleSegments" :key="seg.key">
@@ -549,7 +553,7 @@ useBackHandler(() => {
               :style="{ position: 'absolute', top: seg.offset + 'px', width: '100%' }"
             >
               <span>{{ (seg as any).date }}</span>
-              <span class="m-date-count">{{ (seg as any).count }}</span>
+              <span class="m-date-count">{{ (seg as any).count }} 张</span>
             </div>
             <div
               v-else
@@ -563,7 +567,8 @@ useBackHandler(() => {
                 :style="{ width: cellSize + 'px', height: cellSize + 'px' }"
                 @click="openPhoto(p)"
               >
-                <LazyThumb :src="thumbOf(p)" :fallback-src="fallbackOf(p)" :alt="p.name" aspect-ratio="1/1">
+                <LazyThumb root-margin="100px" :src="thumbOf(p)" :fallback-src="fallbackOf(p)" :alt="p.name" aspect-ratio="1/1">
+                  <template #placeholder><span class="photo-placeholder" role="img" :aria-label="p.name + ' 加载中'"></span></template>
                   <template #fallback>
                     <van-icon name="photo-o" size="28" color="#c0c4cc" />
                   </template>
@@ -704,4 +709,19 @@ useBackHandler(() => {
   text-align: center; padding: 16px 0 80px;
   font-size: 12px; color: var(--el-text-color-secondary);
 }
+
+.m-album { padding: 0 12px; background: var(--el-bg-color); }
+.m-album-head { padding: 10px 2px; gap: 12px; border-bottom: 1px solid var(--el-border-color-lighter); background: transparent; flex-wrap: wrap; justify-content: space-between; }
+.album-heading,.album-tools { display:flex; align-items:center; gap:8px; min-width:0; }
+.album-heading h2 { font-size:24px; margin:0; letter-spacing:-.04em; }
+.album-heading span,.m-date-count { color:var(--el-text-color-secondary); font-size:12px; }
+.album-tools { max-width:100%; }
+.album-tools button { border:0; background:var(--el-fill-color-light); color:var(--el-text-color-regular); border-radius:12px; height:40px; padding:0 12px; display:flex; align-items:center; justify-content:center; gap:7px; }
+.album-source span { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; max-width:32vw; }
+.m-date-title { padding:0 2px; height:40px; background:transparent; font-size:14px; color:var(--el-text-color-primary); }
+.m-date-count { margin-left:auto; }
+.m-cell { border-radius:9px; }
+.m-album .floating-date { position:sticky; display:block; width:max-content; height:0; padding:0; background:none; backdrop-filter:none; }
+.m-album .floating-date span { background:#232832e0; border-radius:18px; padding:5px 12px; }
+.photo-placeholder { width:100%; height:100%; background:linear-gradient(145deg,var(--el-fill-color-light),var(--el-fill-color)); }
 </style>

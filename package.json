@@ -1,7 +1,7 @@
 {
   "name": "synolink-tauri",
   "private": true,
-  "version": "0.1.15",
+  "version": "0.1.18",
   "type": "module",
   "scripts": {
     "test": "node --test scripts/*.test.mjs",
@@ -9,7 +9,10 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test:updater": "node scripts/check-update-browser.mjs",
+    "android:build": "tauri android build --target aarch64 --apk",
+    "android:dev": "tauri android dev"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",

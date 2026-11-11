@@ -40,3 +40,8 @@ dist-ssr
 # Local assistant workspace state
 .codex/
 .agents/
+
+# Android local signing keys
+.android-signing/
+*.jks
+*.keystore

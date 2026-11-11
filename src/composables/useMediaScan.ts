@@ -6,6 +6,7 @@ import { dsm } from '../api/dsm'
 export interface UseMediaScanOptions {
   extensions: string
   filterFn: (f: any) => boolean
+  firstPagePreview?: number
   visibleInit?: number
   visibleStep?: number
   storageKeyPrefix: string
@@ -191,7 +192,9 @@ export function useMediaScan(opts: UseMediaScanOptions) {
           collected.push(...filtered)
           offset += batch.length
           idleRounds = 0
-          if (Date.now() - lastFlushAt >= FLUSH_INTERVAL) {
+          if (opts.firstPagePreview) {
+            if (!items.value.length && collected.length) items.value = collected.slice(0, opts.firstPagePreview)
+          } else if (Date.now() - lastFlushAt >= FLUSH_INTERVAL) {
             flush()
             await new Promise<void>((r) => setTimeout(r, 0))
           }

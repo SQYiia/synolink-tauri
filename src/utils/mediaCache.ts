@@ -27,7 +27,7 @@ export async function writeMediaCache(key: string, items: any[]) {
     db = await database()
     await new Promise<void>((resolve, reject) => {
       const transaction = db!.transaction('libraries', 'readwrite')
-      transaction.objectStore('libraries').put(JSON.parse(JSON.stringify(items)), key)
+      transaction.objectStore('libraries').put(items, key)
       transaction.oncomplete = () => resolve()
       transaction.onerror = () => reject(transaction.error)
       transaction.onabort = () => reject(transaction.error)

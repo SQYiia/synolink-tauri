@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { updates, updateSupported, setAutomatic, checkForUpdates } from '../composables/useAppUpdate'
 import { onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { invoke } from '@tauri-apps/api/core'
@@ -409,6 +410,10 @@ function onThemeSelect(_a: ActionSheetAction, idx: number) {
       </div>
     </div>
 
+    <div v-if="updateSupported" class="info-card" style="margin-top: 20px">
+      <div class="info-row"><span>SynoLink {{ updates.currentVersion }}</span><el-button @click="checkForUpdates()">检查更新</el-button></div>
+      <div class="info-row"><span>自动检查新版本</span><el-switch :model-value="updates.automatic" @update:model-value="setAutomatic(Boolean($event))" /></div>
+    </div>
     <div class="actions">
       <el-button @click="forgetPasswords">删除已保存密码</el-button>
       <el-button @click="switchServer" style="width: 100%; margin-top: 8px">切换服务器</el-button>

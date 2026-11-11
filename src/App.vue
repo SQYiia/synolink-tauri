@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppUpdateDialog from './components/AppUpdateDialog.vue'
 import { onMounted, onUnmounted, ref } from 'vue'
 import { isTauri } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -8,7 +9,7 @@ import { confirm } from './utils/feedback'
 import { useAppStore } from './stores/app'
 import { initTheme } from './composables/useTheme'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
-import { isIOS } from './utils/platform'
+import { isIOS, isMobileUA } from './utils/platform'
 import {
   iosNetworkBlocked,
   openIOSSettings,
@@ -23,7 +24,7 @@ const retrying = ref(false)
 let unlistenClose: (() => void) | undefined
 let confirmingClose = false
 onMounted(async () => {
-  if (!isTauri() || isIOS) return
+  if (!isTauri() || isMobileUA) return
   unlistenClose = await getCurrentWindow().onCloseRequested(async event => {
     const pending = downloadQueue.value.some(t => t.status === 'downloading' || t.status === 'queued') ||
       fileOperations.some(t => t.status === 'running')
@@ -96,6 +97,7 @@ onMounted(() => {
 
 <template>
   <router-view />
+  <AppUpdateDialog />
 
   <!-- 首次启动：解释为什么要本地网络权限，确认后触发系统弹窗 -->
   <van-dialog

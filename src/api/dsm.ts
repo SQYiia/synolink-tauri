@@ -1,8 +1,8 @@
 import { fetch } from '@tauri-apps/plugin-http'
 import { invoke } from '@tauri-apps/api/core'
 
-/** Windows 下自定义 scheme 走 http://<scheme>.localhost，其他平台是 <scheme>://localhost */
-const IS_WINDOWS = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent)
+/** Windows / Android 下自定义 scheme 走 http://<scheme>.localhost，其他平台是 <scheme>://localhost */
+const IS_WINDOWS = typeof navigator !== 'undefined' && /Windows|Android/i.test(navigator.userAgent)
 const DSM_SCHEME_BASE = IS_WINDOWS ? 'http://dsm.localhost' : 'dsm://localhost'
 
 /** DSM 统一响应结构（doc 1.4） */

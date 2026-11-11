@@ -12,8 +12,8 @@ let active = true
 function canControl(p:NasPackage) { return !!capabilities.value['SYNO.Core.Package.Control'] && (p.startable || p.operations.includes('start') || p.operations.includes('stop')) && ['running','stop','stopped'].includes(p.status) }
 function details(p:NasPackage) { selected.value=p;detailOpen.value=true }
 async function control(p:NasPackage, action:'start'|'stop'|'uninstall') {
- if(operation.value||busy.value||error.value||context!==JSON.stringify([dsm.baseUrl,dsm.account]))return
- const identity=JSON.stringify([dsm.baseUrl,dsm.account]);operation.value=p.id;outcome.value=''
+ if(operation.value||busy.value||context!==JSON.stringify([dsm.baseUrl,dsm.account]))return
+ const identity=JSON.stringify([dsm.baseUrl,dsm.account]);operation.value=p.id;outcome.value='';error.value=''
  try {
   const text=action==='uninstall'?'卸载 '+p.name+'？套件及其数据可能被删除，依赖它的服务也可能受到影响。':action==='stop'?'停止 '+p.name+'？使用此套件的服务会暂时不可用。':'启动 '+p.name+'？'
   if(!await confirm(text,'确认套件操作',{danger:action!=='start'}))return
@@ -59,16 +59,16 @@ onDeactivated(() => { active=false; generation++; busy.value = false; detailOpen
 </script>
 <template>
   <section class="apps-page">
-    <header><div><span class="eyebrow">NAS WORKSPACE</span><h1>应用中心</h1><p>管理套件运行状态、查看资料，以及安装和更新应用。</p></div><el-button :loading="busy" @click="refresh">刷新套件</el-button></header>
+    <header><div><span class="eyebrow">NAS WORKSPACE</span><h1>套件中心</h1><p>安装、更新和卸载 NAS 套件。</p></div><el-button :loading="busy" @click="refresh">刷新套件</el-button></header>
     <el-alert v-if="error" :title="error" type="warning" :closable="false" show-icon />
     <PackageCenter :installed="packages" :capabilities="capabilities" @changed="refresh" />
     <el-alert v-if="outcome" :title="outcome" type="info" :closable="false" />
-    <div class="apps-toolbar"><el-input v-model="query" placeholder="搜索套件名称" clearable aria-label="搜索套件" /><el-radio-group v-model="filter"><el-radio-button value="all">全部套件</el-radio-button><el-radio-button value="ready">已接入</el-radio-button></el-radio-group><span>{{ packages.length }} 个套件 · {{ updated ? '更新于 ' + updated : '等待更新' }}</span></div>
+    <h2 class="installed-title">已安装</h2><div class="apps-toolbar"><el-input v-model="query" placeholder="搜索套件名称" clearable aria-label="搜索套件" /><el-radio-group v-model="filter"><el-radio-button value="all">全部套件</el-radio-button><el-radio-button value="ready">已接入</el-radio-button></el-radio-group><span>{{ packages.length }} 个套件 · {{ updated ? '更新于 ' + updated : '等待更新' }}</span></div>
     <div v-if="filtered.length" class="apps-grid">
       <article v-for="p in filtered" :key="p.id" class="package-card">
         <div class="package-heading"><div class="package-mark">{{ p.name.slice(0, 1).toUpperCase() }}</div><div><h3>{{ p.name }}</h3><small>{{ p.version }}</small></div></div>
         <p class="package-description">{{ p.description || p.id }}</p>
-        <div class="package-controls"><el-button @click="details(p)">详情</el-button><el-button :loading="operation===p.id" :disabled="!!operation||busy||!!error||!canControl(p)" @click="control(p,p.status==='running'?'stop':'start')">{{ p.status==='running'?'停止':'启动' }}</el-button></div>
+        <div class="package-controls"><el-button @click="details(p)">详情</el-button><el-button :loading="operation===p.id" :disabled="!!operation||busy||!canControl(p)" @click="control(p,p.status==='running'?'stop':'start')">{{ p.status==='running'?'停止':'启动' }}</el-button><el-button type="danger" plain :disabled="!!operation||busy||!capabilities['SYNO.Core.Package.Uninstallation']" @click="control(p,'uninstall')">卸载</el-button></div>
         <footer><el-tag :type="p.status === 'running' ? 'success' : 'info'">{{ packageState(p.status) }}</el-tag><el-button v-if="entry(p)" :disabled="p.status !== 'running'" @click="router.push(entry(p)!.path)">{{ entry(p)!.label }}</el-button><span v-else class="not-integrated">尚未接入</span></footer>
       </article>
     </div>
@@ -78,8 +78,9 @@ onDeactivated(() => { active=false; generation++; busy.value = false; detailOpen
   </section>
 </template>
 <style scoped>
-.package-controls{display:flex;gap:8px;margin:12px 0}.package-controls .el-button{margin:0}
+.package-controls{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}.package-controls .el-button{margin:0}
 .apps-page { padding:28px; overflow:auto; height:100%; box-sizing:border-box; }
 header,.apps-toolbar,footer,.package-heading { display:flex; align-items:center; gap:16px; } header,footer { justify-content:space-between; }h1 { margin:6px 0; font-size:26px; }header p,.apps-note,.apps-toolbar>span { color:var(--el-text-color-secondary); font-size:12px; } .eyebrow { font-size:10px; letter-spacing:2px; color:var(--el-text-color-secondary); }
 .apps-toolbar { margin:24px 0; flex-wrap:wrap; }.apps-toolbar .el-input { max-width:280px; }.apps-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:16px; }.package-card { border:1px solid var(--el-border-color); border-radius:16px; padding:20px; background:var(--el-bg-color); display:flex; flex-direction:column; }.package-mark { width:42px; height:42px; display:grid; place-items:center; border-radius:12px; background:var(--el-color-primary-light-9); color:var(--el-color-primary); font-size:22px; font-weight:700; }.package-heading h3 { font-size:15px; margin:0 0 5px; overflow-wrap:anywhere; }.package-heading small,.not-integrated { color:var(--el-text-color-secondary); font-size:11px; }.package-description { line-height:1.7; color:var(--el-text-color-secondary); font-size:12px; flex:1; overflow-wrap:anywhere; max-height:80px; overflow:auto; }.apps-note { margin-top:24px; line-height:1.8; }@media(max-width:640px){.apps-page{padding:16px}.apps-grid{grid-template-columns:1fr}header{align-items:flex-start}}
+.installed-title{font-size:17px;margin:24px 0 0}.apps-toolbar{margin-top:12px}
 </style>
