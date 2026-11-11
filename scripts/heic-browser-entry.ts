@@ -1,3 +1,4 @@
+import Diagnostics from '../src/views/Diagnostics.vue'
 import Vant from 'vant'
 import 'vant/lib/index.css'
 export { convertHeic } from '../src/utils/heic'
@@ -110,7 +111,7 @@ export async function showWorkspace(initialPhotoCount = 1) {
   store.accounts = [{ id: 'fixture', account: 'alice', serverId: 'fixture', rememberPassword: false }]
   store.currentAccountId = 'fixture'
   const router = createRouter({ history: createMemoryHistory(), routes: [
-    { path: '/app/album', component: Album }, { path: '/app/videos', component: Videos }, { path: '/app/drive', component: Drive }, { path: '/app/backups', component: Backups }, { path: '/app/applications', component: Applications }, { path: '/app/containers', component: Containers }, { path: '/app/dashboard', component: Dashboard }, { path: '/app/files', component: Files }, { path: '/app/vmm', component: Vmm }, { path: '/app/monitor', component: Monitor }, { path: '/app/downloads', component: Downloads },
+    { path: '/app/album', component: Album }, { path: '/app/videos', component: Videos }, { path: '/app/drive', component: Drive }, { path: '/app/backups', component: Backups }, { path: '/app/applications', component: Applications }, { path: '/app/containers', component: Containers }, { path: '/app/dashboard', component: Dashboard }, { path: '/app/files', component: Files }, { path: '/app/vmm', component: Vmm }, { path: '/app/diagnostics', component: Diagnostics }, { path: '/app/monitor', component: Monitor }, { path: '/app/downloads', component: Downloads },
   ] })
   app.use(router); await router.push('/app/dashboard'); await router.isReady(); app.mount(root)
   return { renewMediaSession: () => { mediaCount++; dsm.sid = 'renewed-fixture' }, addMedia: () => { mediaCount++ }, navigate: (path: string) => router.push(path), close: () => { app.unmount(); root.remove() } }

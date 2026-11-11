@@ -21,6 +21,7 @@ const routes = [
       { path: 'downloads', component: () => import('../views/Downloads.vue'), meta: { title: '下载', tab: true } },
       { path: 'monitor', component: () => import('../views/Monitor.vue'), meta: { title: '性能', tab: true } },
       { path: 'vmm', component: () => import('../views/Vmm.vue'), meta: { title: '虚拟机' } },
+      { path: 'diagnostics', component: () => import('../views/Diagnostics.vue'), meta: { title: '连接诊断' } },
       { path: 'me', component: () => import('../views/Me.vue'), meta: { title: '设置', tab: true } },
     ],
   },

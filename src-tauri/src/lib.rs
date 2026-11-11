@@ -1,3 +1,5 @@
+mod native_downloads;
+mod delivery;
 mod updater;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -420,6 +422,7 @@ async fn download_to_file(
             total: if total > 0 { total } else { loaded },
         },
     );
+    delivery::register(&app, task_id.clone(), final_path.to_string_lossy().to_string());
     let _ = app.emit(
         "download:done",
         DonePayload {
@@ -977,9 +980,23 @@ fn dsm_protocol(
     });
 }
 
+#[tauri::command]
+fn save_diagnostic_report(path: String, report: String) -> Result<(), String> {
+    if report.len() > 262144 { return Err("诊断报告过大".into()); }
+    let data: serde_json::Value = serde_json::from_str(&report).map_err(|_| "无效报告")?;
+    if !data.is_object() { return Err("无效报告".into()); }
+    let target = std::path::PathBuf::from(path);
+    if target.extension().and_then(|v|v.to_str()) != Some("json") { return Err("请保存为 JSON 文件".into()); }
+    std::fs::write(target, report).map_err(|_| "报告保存失败".into())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(native_downloads::Queue::default())
+        .setup(|app|{native_downloads::setup(app.handle());Ok(())})
+        .manage(delivery::Completed::default())
+        .plugin(delivery::init())
         .manage(AppState::default())
         .manage(updater::UpdateState::default())
         .plugin(tauri_plugin_opener::init())
@@ -988,6 +1005,13 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .register_asynchronous_uri_scheme_protocol("dsm", dsm_protocol)
         .invoke_handler(tauri::generate_handler![
+            native_downloads::native_download_remove,
+            native_downloads::native_download_add,
+            native_downloads::native_download_cancel,
+            native_downloads::native_download_snapshot,
+            delivery::deliver_download,
+            delivery::export_android_report,
+            save_diagnostic_report,
             updater::check_app_update,
             updater::download_app_update,
             updater::install_app_update,

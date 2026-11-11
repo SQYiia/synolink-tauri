@@ -10,6 +10,11 @@ class MainActivity : TauriActivity() {
   // Let the system Back gesture navigate Vue's WebView history first.
   override val handleBackNavigation: Boolean = true
 
+  override fun onNewIntent(intent: android.content.Intent) {
+    super.onNewIntent(intent)
+    if (intent.getBooleanExtra("synolink_transfers", false)) DownloadService.callback?.send(app.tauri.plugin.JSObject().put("reason", "open"))
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)

@@ -1,3 +1,4 @@
+import { recordError } from '../utils/errorHistory'
 import { fetch } from '@tauri-apps/plugin-http'
 import { invoke } from '@tauri-apps/api/core'
 
@@ -110,6 +111,7 @@ export class DsmClient {
     } = {},
     _retried = false,
   ): Promise<T> {
+    const started = Date.now()
     const requestIdentity = `${this.baseUrl}\n${this.account}`
     const method = opts.method ?? 'GET'
     // 根据调用的 api 选择会话 sid：SYNO.DownloadStation.* 优先用 dsSid，其余用主 sid
@@ -143,6 +145,7 @@ export class DsmClient {
       headers['Content-Type'] = 'application/x-www-form-urlencoded'
     }
 
+    try {
     const res = await fetch(url, {
       method,
       headers,
@@ -155,7 +158,7 @@ export class DsmClient {
         acceptInvalidHostnames: this.allowInsecure,
       },
     } as any)
-    if (!res.ok) throw new Error(`服务器响应异常（HTTP ${res.status}）`)
+    if (!res.ok) throw Object.assign(new Error(`服务器响应异常（HTTP ${res.status}）`),{code:res.status})
     const text = await res.text()
     if (requestIdentity !== `${this.baseUrl}\n${this.account}`) throw new Error('连接已切换，已忽略旧请求的结果')
     let parsed: any
@@ -176,7 +179,10 @@ export class DsmClient {
         if (ok) return this.request<T>(path, opts, true)
       }
     }
+    if(parsed?.success===false) void recordError(requestIdentity,'api','request',parsed?.error?.code,Date.now()-started,_retried?'failed':'none')
+    else if(_retried) void recordError(requestIdentity,'api','request',null,Date.now()-started,'recovered')
     return parsed as T
+    } catch(error) { void recordError(requestIdentity,'api','request',(error as {code?:number})?.code,Date.now()-started,_retried?'failed':'none'); throw error }
   }
 
   /** SYNO.API.Info (doc 2.1) */
@@ -553,6 +559,8 @@ export class DsmClient {
   /** Load authenticated image bytes through the same native HTTP transport as API requests. */
   async imageBlob(kind: 'thumb' | 'image', path: string, size: 'small' | 'medium' | 'large' | 'original' = 'small', signal?: AbortSignal, retried = false): Promise<Blob> {
     const identity = `${this.baseUrl}\n${this.account}`
+    const started = Date.now()
+    try {
     const requestSid = this.sid
     if (!requestSid) throw new MediaError('请先登录服务器')
     if (signal?.aborted) throw new DOMException('已取消', 'AbortError')
@@ -574,7 +582,7 @@ export class DsmClient {
       const label = kind === 'thumb' ? '缩略图' : '原图'
       throw new MediaError(response.status === 404
         ? `${label}未找到（HTTP 404）${kind === 'thumb' ? '，NAS 可能未生成预览' : '，请检查文件是否已移动'}`
-        : `${label}请求失败（HTTP ${response.status}）`)
+        : `${label}请求失败（HTTP ${response.status}）`, response.status)
     }
     const limit = (kind === 'thumb' ? 16 : 64) * 1024 * 1024
     if (Number(response.headers.get('content-length')) > limit) {
@@ -615,6 +623,7 @@ export class DsmClient {
       800: '图片文件不存在或已移动', 801: 'NAS 无法生成此文件的缩略图',
     }
     throw new MediaError(code ? `${messages[code] ?? 'NAS 拒绝图片请求'}（${code}）` : '服务器返回的内容不是可显示的图片', code)
+    } catch(error) { if(!signal?.aborted) void recordError(identity,'image',kind==='thumb'?'thumbnail':'original',error instanceof MediaError?error.code:null,Date.now()-started,retried?'failed':'none'); throw error }
   }
 
   /** Resolve a local media descriptor; never fetch its custom-scheme URL in the WebView. */

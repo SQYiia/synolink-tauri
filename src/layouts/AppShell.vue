@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import { onMounted as mountTransfer, onUnmounted as unmountTransfer } from 'vue'
+import { invoke as invokeDelivery } from '@tauri-apps/api/core'
+import { isAndroid } from '../utils/platform'
+async function deliver(id:string,share:boolean){try{await invokeDelivery('deliver_download',{taskId:id,share})}catch{alert('文件导出失败，请检查文件状态或存储权限')}}
+
 import { onMounted, onUnmounted, watch, ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -27,6 +32,9 @@ let globalSearchController: AbortController | null = null
 watch(globalSearchOpen, open => { if (!open) globalSearchController?.abort() })
 onUnmounted(() => { globalSearchController?.abort(); setSessionRecoverer(null) })
 const downloadDrawerOpen = ref(false)
+const openTransfers=()=>{downloadDrawerOpen.value=true}
+mountTransfer(()=>window.addEventListener('synolink-open-transfers',openTransfers))
+unmountTransfer(()=>window.removeEventListener('synolink-open-transfers',openTransfers))
 
 async function doGlobalSearch() {
   if (!globalSearchQuery.value.trim()) return
@@ -410,6 +418,7 @@ function onTabChange(i: number) {
           <template #value>
             <van-button v-if="t.status === 'downloading' || t.status === 'queued'" size="mini" type="warning" @click="cancelTask(t.id)">取消</van-button>
             <template v-else>
+              <van-button v-if="isAndroid && t.status==='done'" size="mini" @click="deliver(t.id,false)">保存到手机</van-button><van-button v-if="isAndroid && t.status==='done'" size="mini" @click="deliver(t.id,true)">分享</van-button>
               <van-button v-if="t.status === 'done' && t.savePath" size="mini" type="primary" plain @click="revealSavedFile(t.savePath)">打开</van-button>
               <van-button v-if="t.status === 'error' || t.status === 'cancelled'" size="mini" plain @click="retryTask(t.id)">继续 / 重试</van-button>
               <van-button size="mini" plain @click="removeTask(t.id)">移除</van-button>

@@ -8,6 +8,7 @@ function loadClient(fetch = async () => { throw new Error('Unexpected request') 
   const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const exports = {}
   const require = name => {
+    if (name === '../utils/errorHistory') return { recordError: async () => {} }
     if (name === '@tauri-apps/plugin-http') return { fetch }
     if (name === '@tauri-apps/api/core') return { invoke: async () => {} }
     if (name === '../utils/heic') return { convertHeic }

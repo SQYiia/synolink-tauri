@@ -1,3 +1,5 @@
+import { isAndroid } from '../utils/platform'
+import { recordError } from '../utils/errorHistory'
 import { reactive, computed, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
@@ -163,7 +165,11 @@ function ensureListeners(): Promise<void> {
   return listenersReady
 }
 
+const legacyNativeTasks=new Map(state.tasks.map(task=>[task.id,task]))
+async function syncNative(){if(isAndroid){const tasks=await invoke<DownloadTask[]>('native_download_snapshot');for(const task of tasks){if(task.status==='error'&&state.tasks.find(t=>t.id===task.id)?.status!=='error')void recordError(task.sourceUrl+'\n'+task.sourceAccount,'download','transfer',null,0)}for(const task of tasks)legacyNativeTasks.delete(task.id);state.tasks.splice(0,state.tasks.length,...tasks.reverse(),...legacyNativeTasks.values())}}
+if(isAndroid)document.addEventListener('visibilitychange',()=>{if(!document.hidden)void syncNative()})
 async function doSetupListeners() {
+  if(isAndroid){unlistens.push(await listen('native-downloads:open',()=>window.dispatchEvent(new Event('synolink-open-transfers'))));unlistens.push(await listen('native-downloads:changed',()=>{void syncNative()}));await syncNative();return}
   unlistens.push(
     await listen<ProgressPayload>('download:progress', (e) => {
       const t = state.tasks.find(x => x.id === e.payload.taskId)
@@ -205,6 +211,7 @@ async function doSetupListeners() {
       if (!t) return
       t.status = 'error'
       t.error = e.payload.error
+      void recordError(t.sourceUrl+'\n'+t.sourceAccount,'download','transfer',null,0)
       processQueue()
     }),
     await listen<ProgressPayload>('download:cancelled', (e) => {
@@ -230,6 +237,7 @@ export async function enqueue(path: string, name: string, size: number = 0, save
   if (!effectiveDir) effectiveDir = await ensureDownloadDir()
   const id = crypto.randomUUID()
   const task: DownloadTask = { id, sourceUrl, sourceAccount, path, name, size, loaded: 0, status: 'queued', saveDir: effectiveDir }
+  if(isAndroid){await invoke('native_download_add',{id,path,name,size,sourceUrl,sourceAccount,saveDir:effectiveDir||null});await syncNative();return id}
   state.tasks.unshift(task)
   if (isMobileUA) {
     showToast({ message: `已加入下载队列：${name}`, duration: 1800 })
@@ -245,6 +253,7 @@ export async function enqueue(path: string, name: string, size: number = 0, save
 }
 
 export function cancelTask(id: string) {
+  if(isAndroid){void invoke('native_download_cancel',{taskId:id}).then(syncNative);return}
   const task = state.tasks.find(t => t.id === id)
   if (!task) return
   if (task.status === 'downloading') {
@@ -263,17 +272,20 @@ export async function retryTask(id: string) {
     return
   }
   await ensureListeners()
+  if(isAndroid){await invoke('native_download_add',{id:task.id,path:task.path,name:task.name,size:task.size,sourceUrl:task.sourceUrl,sourceAccount:task.sourceAccount,saveDir:task.saveDir||null});await syncNative();return}
   task.status = 'queued'
   task.error = undefined
   processQueue()
 }
 
 export function removeTask(id: string) {
+  if(isAndroid){legacyNativeTasks.delete(id);void invoke('native_download_remove',{taskId:id}).then(syncNative).catch(()=>showToast('请先取消正在执行的任务'));return}
   const idx = state.tasks.findIndex(t => t.id === id)
   if (idx >= 0) state.tasks.splice(idx, 1)
 }
 
 export function clearCompleted() {
+  if(isAndroid){for(const task of state.tasks.filter(t=>t.status==='done'))legacyNativeTasks.delete(task.id);void Promise.all(state.tasks.filter(t=>t.status==='done').map(t=>invoke('native_download_remove',{taskId:t.id}))).then(syncNative);return}
   const remaining = state.tasks.filter(t => t.status !== 'done')
   state.tasks.splice(0, state.tasks.length, ...remaining)
 }
@@ -283,6 +295,7 @@ function activeCount() {
 }
 
 function processQueue() {
+  if(isAndroid)return
   while (activeCount() < MAX_CONCURRENT) {
     const next = [...state.tasks].reverse().find(t => t.status === 'queued')
     if (!next) break
@@ -305,8 +318,11 @@ async function startDownload(task: DownloadTask) {
   }).catch((e: any) => {
     if (task.status === 'downloading') {
       task.status = 'error'
+      void recordError(task.sourceUrl+'\n'+task.sourceAccount,'download','transfer',null,0)
       task.error = typeof e === 'string' ? e : (e?.message ?? String(e))
       processQueue()
     }
   })
 }
+
+if(isAndroid)void ensureListeners().catch(()=>{showToast('下载队列恢复失败，请重新打开应用')})

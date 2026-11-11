@@ -258,6 +258,7 @@ function onThemeSelect(_a: ActionSheetAction, idx: number) {
 <template>
   <!-- 桌面端 -->
   <div v-if="!isMobile" class="page ui-settings" v-loading="loading">
+    <el-button @click="router.push('/app/diagnostics')">连接诊断</el-button>
     <div class="profile">
       <div class="profile-left">
         <div class="avatar">
@@ -400,6 +401,7 @@ function onThemeSelect(_a: ActionSheetAction, idx: number) {
 
   <!-- 移动端：纯设置页 -->
   <div v-else class="m-me">
+    <van-cell title="连接诊断" is-link @click="router.push('/app/diagnostics')" />
     <!-- 头像 / 账户区 -->
     <div class="m-profile-card">
       <div class="m-avatar">
