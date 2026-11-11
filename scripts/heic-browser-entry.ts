@@ -93,6 +93,11 @@ export async function showWorkspace(initialPhotoCount = 1) {
   dsm.dsInfo = async () => ({ success: true, data: {} } as any)
   dsm.dsTaskList = async () => ({ success: true, data: { tasks: [{ id: 'fixture-task', title: 'Ubuntu.torrent', type: 'bt', status: 'downloading', size: 100000, additional: { transfer: { speed_download: 0 }, detail: { connected_seeders: 0, connected_leechers: 0, destination: 'downloads' } } }] } } as any)
   dsm.dsStatistic = async () => ({ success: true, data: { speed_download: 0, speed_upload: 0 } } as any)
+  dsm.storageInfo = async () => ({ success: true, data: { volumes: [
+    { display_name: '存储卷 1', volume_path: '/volume1', size_total_byte: '1099511627776', size_free_byte: '824633720832' },
+    { display_name: '存储卷 2', volume_path: '/volume2', size_total_byte: '1073741824', size_free_byte: '0' },
+    { display_name: '存储卷 3', volume_path: '/volume3', status: 'unmounted' },
+  ] } })
   dsm.systemUtilization = async () => ({ success: true, data: { memory: {total_real:4194304,memory_size:8388608,avail_real:262144,cached:2800000,buffer:100000,real_usage:25} } })
   dsm.entry = async () => ({ success: true, data: {} })
   dsm.listAll = async () => ({ success: true, data: { shares: ['Documents', 'Photos', 'Videos', 'Backup'].map(name => ({ name, path: '/' + name, isdir: true, additional: { time: { mtime: 1700000000 } } })) } })

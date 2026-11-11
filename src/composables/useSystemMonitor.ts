@@ -1,6 +1,7 @@
 import { onActivated, onDeactivated } from 'vue'
 import { onMounted, onUnmounted, ref } from 'vue'
 import { dsm } from '../api/dsm'
+import { normalizeVolume } from '../utils/storage'
 import { parseMemory } from '../utils/memory'
 
 const HISTORY_MAX = 60
@@ -63,28 +64,6 @@ export function useSystemMonitor(opts: { autoStart?: boolean; pollMs?: number } 
         pushHistory(netRecvHistory.value, netRecv.value)
       }
     } catch (e) { memPct.value = null; memAvailable.value = false; memInstalled.value = null; memHistory.value = []; console.warn('[monitor] refreshUtil failed:', e) }
-  }
-
-  function normalizeVolume(v: any) {
-    const sizeObj = (v?.size && typeof v.size === 'object') ? v.size : null
-    const size = Number(
-      v?.size_total ?? sizeObj?.total ?? v?.total ??
-      (typeof v?.size === 'number' || typeof v?.size === 'string' ? v.size : 0)
-    ) || 0
-    const free = Number(
-      v?.size_free_user ?? sizeObj?.free_user ?? sizeObj?.free ?? v?.free ?? 0
-    ) || 0
-    let used = Number(
-      v?.size_used ?? v?.used_size ?? sizeObj?.used ?? v?.used ?? 0
-    ) || 0
-    if (!used && size > 0 && free > 0) used = Math.max(0, size - free)
-    return {
-      ...v,
-      _name: v?.display_name ?? v?.volume_path ?? v?.id ?? '-',
-      _size: size,
-      _used: used,
-      _status: v?.status ?? v?.volume_status,
-    }
   }
 
   function normalizeDisk(d: any) {

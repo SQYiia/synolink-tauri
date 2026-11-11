@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 import { invoke } from '@tauri-apps/api/core'
 import { useAppStore } from '../stores/app'
 import { dsm } from '../api/dsm'
+import { normalizeVolume } from '../utils/storage'
 import { formatBytes, formatSpeed } from '../utils/format'
 import { useIsMobile } from '../composables/useIsMobile'
 import { confirm, toast } from '../utils/feedback'
@@ -135,28 +136,6 @@ async function refreshDisks() {
   } catch (e) { console.warn('[Me] refreshDisks failed:', e) }
 }
 
-function normalizeVolume(v: any) {
-  const sizeObj = (v?.size && typeof v.size === 'object') ? v.size : null
-  const size = Number(
-    v?.size_total ?? sizeObj?.total ?? v?.total ??
-    (typeof v?.size === 'number' || typeof v?.size === 'string' ? v.size : 0)
-  ) || 0
-  const free = Number(
-    v?.size_free_user ?? sizeObj?.free_user ?? sizeObj?.free ?? v?.free ?? 0
-  ) || 0
-  let used = Number(
-    v?.size_used ?? v?.used_size ?? sizeObj?.used ?? v?.used ?? 0
-  ) || 0
-  if (!used && size > 0 && free > 0) used = Math.max(0, size - free)
-  return {
-    ...v,
-    _name: v?.display_name ?? v?.volume_path ?? v?.id ?? '-',
-    _size: size,
-    _used: used,
-    _status: v?.status ?? v?.volume_status,
-  }
-}
-
 function normalizeDisk(d: any) {
   const sizeObj = (d?.size && typeof d.size === 'object') ? d.size : null
   const size = Number(
@@ -219,10 +198,8 @@ function cachePct() {
   return Math.min(100, Math.round((cacheSize.value / CACHE_LIMIT_BYTES) * 100))
 }
 
-function volPct(v: any) {
-  const used = Number(v?._used ?? v?.used ?? 0)
-  const size = Number(v?._size ?? v?.size ?? v?.total ?? 0)
-  return size ? Math.round((used / size) * 100) : 0
+function volumeBytes(value: number | null) {
+  return value == null ? '未返回' : formatBytes(value)
 }
 function pctColor(p: number) {
   if (p >= 90) return '#f56c6c'
@@ -353,12 +330,12 @@ function onThemeSelect(_a: ActionSheetAction, idx: number) {
       <div v-for="v in volumes" :key="v.id ?? v.volume_path ?? v._name" class="vol-card">
         <div class="vol-head">
           <span class="vol-name">{{ v._name }}</span>
-          <span class="vol-pct">{{ volPct(v) }}%</span>
+          <span class="vol-pct">{{ v._pct == null ? '用量未知' : v._pct + '%' }}</span>
         </div>
         <div class="vol-bar">
-          <div class="vol-fill" :style="{ width: volPct(v) + '%', background: pctColor(volPct(v)) }"></div>
+          <div class="vol-fill" :style="{ width: (v._pct ?? 0) + '%', background: pctColor(v._pct ?? 0) }"></div>
         </div>
-        <div class="vol-detail">{{ formatBytes(v._used) }} / {{ formatBytes(v._size) }}</div>
+        <div class="vol-detail">已用 {{ volumeBytes(v._used) }} · 可用 {{ volumeBytes(v._free) }} · 总容量 {{ volumeBytes(v._size) }}</div>
       </div>
     </div>
 

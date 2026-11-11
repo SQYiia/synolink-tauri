@@ -32,10 +32,8 @@ function sparklinePath(data: number[], width: number, height: number): string {
   }).join(' ')
 }
 
-function volPct(v: any) {
-  const used = Number(v?._used ?? v?.used ?? 0)
-  const size = Number(v?._size ?? v?.size ?? v?.total ?? 0)
-  return size ? Math.round((used / size) * 100) : 0
+function volumeBytes(value: number | null) {
+  return value == null ? '未返回' : formatBytes(value)
 }
 function pctColor(p: number) {
   if (p >= 90) return 'hsl(0 84% 60%)'
@@ -95,12 +93,12 @@ function pctColor(p: number) {
       <div v-for="v in m.volumes.value" :key="v.id ?? v.volume_path ?? v._name" class="vol-card">
         <div class="vol-head">
           <span class="vol-name">{{ v._name }}</span>
-          <span class="vol-pct">{{ volPct(v) }}%</span>
+          <span class="vol-pct">{{ v._pct == null ? '用量未知' : v._pct + '%' }}</span>
         </div>
         <div class="vol-bar">
-          <div class="vol-fill" :style="{ width: volPct(v) + '%', background: pctColor(volPct(v)) }"></div>
+          <div class="vol-fill" :style="{ width: (v._pct ?? 0) + '%', background: pctColor(v._pct ?? 0) }"></div>
         </div>
-        <div class="vol-detail">{{ formatBytes(v._used) }} / {{ formatBytes(v._size) }}</div>
+        <div class="vol-detail">已用 {{ volumeBytes(v._used) }} · 可用 {{ volumeBytes(v._free) }} · 总容量 {{ volumeBytes(v._size) }}</div>
       </div>
     </div>
 
@@ -166,16 +164,16 @@ function pctColor(p: number) {
             <template #title>
               <div class="m-vol-row">
                 <span class="m-vol-name">{{ v._name }}</span>
-                <span class="m-vol-pct">{{ volPct(v) }}%</span>
+                <span class="m-vol-pct">{{ v._pct == null ? '用量未知' : v._pct + '%' }}</span>
               </div>
               <van-progress
-                :percentage="volPct(v)"
-                :color="pctColor(volPct(v))"
+                :percentage="v._pct ?? 0"
+                :color="pctColor(v._pct ?? 0)"
                 :show-pivot="false"
                 stroke-width="4"
                 style="margin-top: 6px"
               />
-              <div class="m-vol-detail">{{ formatBytes(v._used) }} / {{ formatBytes(v._size) }}</div>
+              <div class="m-vol-detail">已用 {{ volumeBytes(v._used) }} · 可用 {{ volumeBytes(v._free) }} · 总容量 {{ volumeBytes(v._size) }}</div>
             </template>
           </van-cell>
         </van-cell-group>
