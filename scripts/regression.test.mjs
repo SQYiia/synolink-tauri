@@ -236,10 +236,9 @@ test('cancelled search releases its NAS task', async () => {
   const { DsmClient } = loadClient()
   const client = new DsmClient('https://nas')
   let stopped = false
-  client.searchStart = async () => ({ success: true, data: { taskid: 'search-2' } })
+  client.searchStart = async () => { controller.abort();return { success: true, data: { taskid: 'search-2' } } }
   client.searchStop = async () => { stopped = true }
   const controller = new AbortController()
-  controller.abort()
   await assert.rejects(client.searchAll('/', 'photo', controller.signal), /取消/)
   assert.equal(stopped, true)
 })

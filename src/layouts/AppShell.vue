@@ -14,6 +14,8 @@ import { dsm, setSessionRecoverer } from '../api/dsm'
 import { useAppStore } from '../stores/app'
 import { downloadQueue, retryTask, cancelTask, removeTask, clearCompleted, downloadDir, revealSavedFile, chooseDownloadDir, resetDownloadDir, askEveryDownload, setAskEveryDownload, localPickerOpen, resolveLocalPicker } from '../composables/useDownloadQueue'
 import FileOperations from '../components/FileOperations.vue'
+import {identity,snapshotFileClient} from '../composables/useFileOperations'
+import {searchSharedFolders} from '../utils/globalSearch'
 import LocalFolderPicker from '../components/LocalFolderPicker.vue'
 import { formatBytes } from '../utils/format'
 import { useIsMobile } from '../composables/useIsMobile'
@@ -31,8 +33,11 @@ const globalSearchOpen = ref(false)
 const globalSearchQuery = ref('')
 const globalSearchResults = ref<any[]>([])
 const globalSearching = ref(false)
+const globalSearchError=ref('')
+let globalSearchScope='',searchGeneration=0
 let globalSearchController: AbortController | null = null
-watch(globalSearchOpen, open => { if (!open) globalSearchController?.abort() })
+watch(globalSearchOpen, open => { if (!open){searchGeneration++;globalSearchController?.abort();globalSearching.value=false;globalSearchResults.value=[];globalSearchError.value=''} })
+watch(()=>[app.currentServerId,app.currentAccountId],()=>{globalSearchController?.abort();globalSearchResults.value=[];globalSearchOpen.value=false})
 onUnmounted(() => { globalSearchController?.abort(); setSessionRecoverer(null) })
 const downloadDrawerOpen = ref(false)
 const openTransfers=()=>{downloadDrawerOpen.value=true}
@@ -43,20 +48,27 @@ async function doGlobalSearch() {
   if (!globalSearchQuery.value.trim()) return
   globalSearchController?.abort()
   const controller = new AbortController()
+  const generation=++searchGeneration,client=snapshotFileClient(),scope=identity(),sid=dsm.sid
+  const valid=()=>generation===searchGeneration&&scope===identity()&&sid===dsm.sid&&!controller.signal.aborted
+  globalSearchScope=scope;globalSearchError.value=''
   globalSearchController = controller
   globalSearching.value = true
   globalSearchResults.value = []
   try {
-    globalSearchResults.value = await dsm.searchAll('/', globalSearchQuery.value, controller.signal)
-    if (!globalSearchResults.value.length) ElMessage.info('未找到匹配文件')
+    const result=await searchSharedFolders(client,globalSearchQuery.value.trim(),controller.signal,valid)
+    if(!valid())return
+    globalSearchResults.value=result.files
+    if(result.failed)globalSearchError.value=`${result.failed} 个共享文件夹未能完成搜索，请检查权限或连接。${result.files.length?'下方为已找到的结果。':''}`
+    else if(!result.shares)globalSearchError.value='当前账号没有可搜索的共享文件夹'
   } catch (e: any) {
-    if (!controller.signal.aborted) ElMessage.error(e.message ?? '搜索失败，请重试')
+    if (valid()) globalSearchError.value=e.message ?? '搜索失败，请重试'
   } finally {
     if (globalSearchController === controller) globalSearching.value = false
   }
 }
 
 function goToResult(item: any) {
+  if(globalSearchScope!==identity()){globalSearchOpen.value=false;return}
   globalSearchOpen.value = false
   const filePath = item.path as string
   const folder = filePath.substring(0, filePath.lastIndexOf('/')) || '/'
@@ -230,8 +242,9 @@ function onTabChange(i: number) {
           clearable
           @keyup.enter="doGlobalSearch"
         />
-        <el-button type="primary" :loading="globalSearching" @click="doGlobalSearch">搜索</el-button>
+        <el-button type="primary" :loading="globalSearching" @click="doGlobalSearch">搜索</el-button><el-button v-if="globalSearching" @click="globalSearchController?.abort();globalSearching=false;globalSearchError='搜索已取消'">取消</el-button>
       </div>
+      <el-alert v-if="globalSearchError" :title="globalSearchError" type="warning" :closable="false" style="margin-top:12px"/>
       <div v-if="globalSearchResults.length" class="gsearch-results">
         <div
           v-for="r in globalSearchResults"
@@ -246,7 +259,7 @@ function onTabChange(i: number) {
           </div>
         </div>
       </div>
-      <div v-else-if="!globalSearching && globalSearchQuery" class="gsearch-empty">
+      <div v-else-if="!globalSearching && globalSearchQuery && !globalSearchError" class="gsearch-empty">
         暂无结果
       </div>
     </el-dialog>

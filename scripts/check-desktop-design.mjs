@@ -14,7 +14,11 @@ try{
  const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];page.on('pageerror',e=>errors.push(e.message))
  await page.goto('http://127.0.0.1:'+server.address().port);await page.evaluate(async()=>{window.fixture=await(await import('/fixture.js')).mount(true)})
  await page.getByText('2026 年度旅行计划.pdf',{exact:true}).waitFor();await page.screenshot({path:resolve(output,'files-light.png')})
- await page.keyboard.press('Control+k');await page.getByRole('dialog',{name:'全局搜索',exact:true}).waitFor();await page.keyboard.press('Escape')
+ await page.keyboard.press('Control+k');const search=page.getByRole('dialog',{name:'全局搜索',exact:true});await search.waitFor()
+ await search.getByRole('textbox').fill('旅行');await search.getByRole('button',{name:'搜索',exact:true}).click();await search.locator('.gsearch-name').filter({hasText:'2026 年度旅行计划.pdf'}).waitFor()
+ assert.deepEqual(await page.evaluate(()=>window.fixture.calls.filter(c=>c.api==='search').map(c=>c.path)),['/share'])
+ await search.getByRole('textbox').fill('denied');await search.getByRole('button',{name:'搜索',exact:true}).click();await search.getByText(/1 个共享文件夹未能完成搜索/).waitFor()
+ await search.getByRole('textbox').fill('slow');await search.getByRole('button',{name:'搜索',exact:true}).click();await search.getByRole('button',{name:'取消',exact:true}).click();await search.getByText('搜索已取消',{exact:true}).waitFor();await page.keyboard.press('Escape')
  await page.getByRole('button',{name:'传输中心',exact:true}).click();await page.getByRole('dialog',{name:'传输中心',exact:true}).waitFor();await page.keyboard.press('Escape')
  await page.getByRole('button',{name:'路径',exact:true}).click();await page.getByRole('textbox',{name:'目录路径',exact:true}).waitFor();await page.getByRole('button',{name:'路径',exact:true}).click()
  for(const width of [1440,1100,900,760]){await page.setViewportSize({width,height:900});await page.waitForTimeout(150);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert.ok(await page.locator('.content').evaluate(el=>el.scrollWidth<=el.clientWidth+1));await page.screenshot({path:resolve(output,'files-'+width+'.png')})}

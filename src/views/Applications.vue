@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PackageIcon from '../components/PackageIcon.vue'
 import { computed, onActivated, onDeactivated, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import PackageCenter from '../components/PackageCenter.vue'
@@ -68,7 +69,7 @@ onDeactivated(() => { active=false; generation++; busy.value = false; detailOpen
     <h2 class="installed-title">已安装</h2><div class="apps-toolbar"><el-input v-model="query" placeholder="搜索套件名称" clearable aria-label="搜索套件" /><el-radio-group v-model="filter"><el-radio-button value="all">全部套件</el-radio-button><el-radio-button value="ready">已接入</el-radio-button></el-radio-group><span>{{ packages.length }} 个套件 · {{ updated ? '更新于 ' + updated : '等待更新' }}</span></div>
     <div v-if="filtered.length" class="apps-grid">
       <article v-for="p in filtered" :key="p.id" class="package-card">
-        <div class="package-heading"><div class="package-mark">{{ p.name.slice(0, 1).toUpperCase() }}</div><div><h3>{{ p.name }}</h3><small>{{ p.version }}</small></div></div>
+        <div class="package-heading"><PackageIcon :pkg="p"/><div><h3>{{ p.name }}</h3><small>{{ p.version }}</small></div></div>
         <p class="package-description">{{ p.description || p.id }}</p>
         <div class="package-controls"><el-button @click="details(p)">详情</el-button><el-button :loading="operation===p.id" :disabled="!!operation||busy||!canControl(p)" @click="control(p,p.status==='running'?'stop':'start')">{{ p.status==='running'?'停止':'启动' }}</el-button><el-button type="danger" plain :disabled="!!operation||busy||!capabilities['SYNO.Core.Package.Uninstallation']" @click="control(p,'uninstall')">卸载</el-button></div>
         <footer><el-tag :type="p.status === 'running' ? 'success' : 'info'">{{ packageState(p.status) }}</el-tag><el-button v-if="entry(p)" :disabled="p.status !== 'running'" @click="router.push(entry(p)!.path)">{{ entry(p)!.label }}</el-button><span v-else class="not-integrated">尚未接入</span></footer>

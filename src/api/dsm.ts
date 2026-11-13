@@ -380,6 +380,7 @@ export class DsmClient {
   }
 
   async searchAll(folder: string, pattern: string, signal?: AbortSignal) {
+    if (signal?.aborted) throw new Error('搜索已取消')
     const start = await this.searchStart(folder, pattern, true)
     if (!start.success || !start.data?.taskid) throw new Error('无法启动搜索')
     const taskid = start.data.taskid
@@ -499,7 +500,7 @@ export class DsmClient {
     extra: { extension?: string; filetype?: 'file' | 'dir' | 'all' } = {},
   ) {
     const params: Record<string, any> = {
-      folder_path: folderPath,
+      folder_path: this.versionOf('SYNO.FileStation.Search') >= 2 ? JSON.stringify([folderPath]) : folderPath,
       pattern,
       recursive: recursive ? 'true' : 'false',
     }

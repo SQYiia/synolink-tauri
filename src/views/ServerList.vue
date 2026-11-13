@@ -67,7 +67,7 @@ function add() {
 }
 
 function pick(serverId: string) {
-  router.push(`/login/${serverId}`)
+  router.push({path:`/login/${serverId}`,query:{auto:'1'}})
 }
 
 async function remove(id: string) {

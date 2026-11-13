@@ -26,6 +26,7 @@ export async function mount(withShell=false){
  const shares=[{name:'share',path:'/share',isdir:true}]
  let links:any[]=[],createError=0,compressDone=false,taskNumber=0
  const calls:any[]=[]
+ DsmClient.prototype.searchAll=async function(path,pattern,signal){calls.push({api:'search',path,pattern});if(pattern==='slow')await new Promise(r=>setTimeout(r,500));if(signal?.aborted)throw Error('搜索已取消');if(pattern==='denied')throw Error('权限不足');return files.filter(f=>f.name.includes(pattern))}
  let holdRename=false,releaseRename:()=>void=()=>{}
  DsmClient.prototype.listAll=async function(folder=''){return {success:true,data:folder?{files:[...files,...(compressDone?[{name:'New.zip',path:'/share/New.zip',isdir:false,additional:{size:100}}]:[])]}:{shares}}}
  DsmClient.prototype.entry=async function(api,method,opts){

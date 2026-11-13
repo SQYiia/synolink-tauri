@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { isAndroid } from '../utils/platform'
 import { invoke } from '@tauri-apps/api/core'
-import { computed, onMounted, reactive, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { showDialog, showToast, showFailToast, showSuccessToast } from 'vant'
 import { useAppStore } from '../stores/app'
@@ -21,9 +21,17 @@ const server = computed(() => app.servers.find(s => s.id === serverId))
 const form = reactive({ account: '', passwd: '', otp_code: '' })
 const loading = ref(false)
 const rememberPassword = ref(false)
+const initializing=ref(true)
+const autoConnecting=ref(route.query.auto==='1')
+let active=true
+let authenticated=false
+onBeforeRouteLeave(()=>!loading.value||authenticated)
+onUnmounted(()=>{active=false})
 
 onMounted(async () => {
+ try {
   await app.load()
+  if(!active)return
   if (!server.value) {
     if (isMobile.value) showFailToast('服务器不存在')
     else ElMessage.error('服务器不存在')
@@ -31,6 +39,7 @@ onMounted(async () => {
     return
   }
   await invoke('clear_session')
+  if(!active)return
   dsm.baseUrl = `${server.value.protocol}://${server.value.host}:${server.value.port}`
   dsm.allowInsecure = !!server.value.allowInsecure
   dsm.apiInfo = {}
@@ -38,8 +47,13 @@ onMounted(async () => {
   dsm.account = ''
   dsm.synoToken = ''
   dsm.sid = ''
+  const last = app.accounts.filter(a => a.serverId === serverId).sort((a,b)=>(b.lastLoginTime??0)-(a.lastLoginTime??0))[0]
+  if(last){form.account=last.account;form.passwd=last.password;rememberPassword.value=!isAndroid&&!!last.rememberPassword}
+  let connected=false
   try {
     await dsm.loadApiInfo()
+    if(!active)return
+    connected=true
     markNetworkSuccess()
   } catch (e: any) {
     markNetworkFailure()
@@ -50,12 +64,10 @@ onMounted(async () => {
     }
   }
 
-  const last = app.accounts.filter(a => a.serverId === serverId).sort((a, b) => (b.lastLoginTime ?? 0) - (a.lastLoginTime ?? 0))[0]
-  if (last) {
-    form.account = last.account
-    form.passwd = last.password
-    rememberPassword.value = !isAndroid && !!last.rememberPassword
-  }
+  initializing.value=false
+  if(active&&connected&&autoConnecting.value&&last?.rememberPassword&&last.password)await submit()
+ }catch{if(active)ElMessage.error('无法初始化连接，请返回服务器列表重试')}
+ finally{initializing.value=false;autoConnecting.value=false}
 })
 
 async function promptOtp(): Promise<string | null> {
@@ -78,6 +90,7 @@ async function promptOtp(): Promise<string | null> {
 }
 
 async function submit() {
+  if(loading.value||initializing.value||!active)return
   if (!form.account || !form.passwd) {
     if (isMobile.value) showToast('请填写账号和密码')
     else ElMessage.warning('请填写账号和密码')
@@ -89,6 +102,7 @@ async function submit() {
     while (needOtp) {
       needOtp = false
       const res = await dsm.login({ account: form.account, passwd: form.passwd, otp_code: form.otp_code })
+      if(!active)return
       markNetworkSuccess()
       if (res.success) {
         const existed = app.accounts.find(a => a.serverId === serverId && a.account === form.account)
@@ -109,6 +123,7 @@ async function submit() {
         }
         if (isMobile.value) showSuccessToast('登录成功')
         else ElMessage.success('登录成功')
+        authenticated=true
         router.replace('/app/files')
       } else {
         const code = res.error?.code
@@ -117,6 +132,7 @@ async function submit() {
           else ElMessage.error('账号或密码错误')
         } else if (code === 403 || code === 404) {
           const otp = await promptOtp()
+          if(!active)return
           if (otp === null) break
           form.otp_code = otp
           needOtp = true
@@ -136,6 +152,7 @@ async function submit() {
     }
   } finally {
     loading.value = false
+    form.otp_code=''
   }
   void showDialog // 触发 import 保留
 }
@@ -147,7 +164,8 @@ function back() {
 
 <template>
   <!-- 桌面端 -->
-  <div v-if="!isMobile" class="page ui-login">
+  <div v-if="autoConnecting" class="page ui-login"><div class="login-card" role="status"><el-icon class="is-loading" :size="28"><Loading /></el-icon><h2>{{server?.name || '连接服务器'}}</h2><p>正在使用已保存的密码登录…</p></div></div>
+  <div v-else-if="!isMobile" class="page ui-login">
     <div class="login-wrapper">
       <el-button class="back-btn" @click="back" circle>
         <el-icon><ArrowLeft /></el-icon>
@@ -160,7 +178,7 @@ function back() {
         <h2 class="card-title">{{ server?.name || server?.host || '登录' }}</h2>
         <p class="card-url">{{ server?.protocol }}://{{ server?.host }}:{{ server?.port }}</p>
 
-        <el-form label-position="top" style="margin-top: 24px; width: 100%;">
+        <el-form :disabled="loading||initializing" label-position="top" style="margin-top: 24px; width: 100%;">
           <el-form-item label="账号">
             <el-input v-model="form.account" autocomplete="username" placeholder="DSM 账号" size="large" />
           </el-form-item>
