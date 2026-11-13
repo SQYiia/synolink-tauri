@@ -186,6 +186,7 @@ export function showJellyfinTest() {
  const series = {...movie,Id:'series1',Name:'山海之间',Type:'Series'}
  const original = JellyfinClient.prototype.request, poster = JellyfinClient.prototype.poster
  JellyfinClient.prototype.request = async function(path,query,body) {
+  if(path.endsWith('/PlaybackInfo')) return {ErrorCode:'NotAllowed'}
   if(body) return {AccessToken:'fixture-token',User:{Id:'fixture-user'}}
   if(path.endsWith('/Items/movie1')) return movie
   if(path.endsWith('/Items/series1')) return series

@@ -11,6 +11,10 @@ import { enqueue, chooseDownloadDir, askEveryDownload, downloadDir } from '../co
 import FolderPicker from '../components/FolderPicker.vue'
 import FileTypeIcon from '../components/FileTypeIcon.vue'
 import FileContextMenu from '../components/FileContextMenu.vue'
+import FileToolsDialog from '../components/FileToolsDialog.vue'
+import { directoryRevision, operationScope } from '../composables/useFileOperations'
+const fileTools = ref<InstanceType<typeof FileToolsDialog>>()
+function toolsOpen(mode:'share'|'manage'|'compress'|'extract',rows:any[]=[]){if(filesIdentity!==JSON.stringify([dsm.baseUrl,dsm.account])){toast('账号已切换，请等待文件列表刷新','warning');return}fileTools.value?.open(mode,rows.map(r=>({...r,isdir:isRowDir(r)})))}
 import { MoreFilled } from '@element-plus/icons-vue'
 import { useIsMobile } from '../composables/useIsMobile'
 import { useBackHandler } from '../composables/useInteractiveSwipeBack'
@@ -92,6 +96,9 @@ const contextItems = computed(() => [
   { id: 'open', label: contextRows.value[0] && isRowDir(contextRows.value[0]) ? '打开文件夹' : '预览', disabled: contextRows.value.length !== 1 },
   { id: 'download', label: '下载', disabled: !contextRows.value.some(row => !isRowDir(row)) },
   { id: 'copy', label: '复制到…' }, { id: 'move', label: '移动到…' },
+  { id: 'share', label: '分享链接', disabled: contextRows.value.length !== 1 },
+  { id: 'compress', label: '创建压缩包' },
+  { id: 'extract', label: '解压到…', disabled: contextRows.value.length !== 1 || isRowDir(contextRows.value[0]) },
   { id: 'rename', label: '重命名', disabled: contextRows.value.length !== 1, shortcut: 'F2' },
   { id: 'delete', label: '删除', danger: true },
 ])
@@ -113,6 +120,7 @@ async function runContext(id: string) {
     if (id === 'open') { if (isRowDir(row)) await openFolder(row); else await preview(row) }
     if (id === 'download') for (const item of rows.filter(item => !isRowDir(item))) await doDownload(item)
     if (id === 'copy' || id === 'move') startCopyMove(id, rows.map(item => item.path))
+    if (id === 'share' || id === 'compress' || id === 'extract') toolsOpen(id, rows)
     if (id === 'rename') await doRename(row)
     if (id === 'delete') { if (rows.length === 1) await doDelete(row); else await batchDelete() }
   } catch (error: any) { toast(error?.message || '操作失败，请重试', 'error') }
@@ -171,7 +179,7 @@ async function onCopyMoveConfirm(dest: string) {
   loading.value = true
   try {
     await queueCopyMove(copyMovePaths.value, dest, copyMoveMode.value === 'move')
-    toast('任务已提交，可在传输中心查看进度；完成后刷新目录', 'success')
+    toast('任务已提交，可在传输中心查看进度；完成后自动刷新目录', 'success')
   } catch (e: any) {
     toast(e.message ?? '无法启动任务', 'error')
   } finally {
@@ -639,11 +647,17 @@ function openSheet(actions: ActionSheetAction[]) {
   sheetActions.value = actions
   sheetOpen.value = true
 }
-function onSheetSelect(action: ActionSheetAction) {
+function onSheetSelect() {
+  // Vant invokes action.callback before emitting select; do not run it twice.
   sheetOpen.value = false
-  ;(action as any).callback?.()
 }
 
+let holdTimer:ReturnType<typeof setTimeout>|undefined,heldRow='',holdX=0,holdY=0
+function beginHold(event:PointerEvent,row:any){if(event.pointerType==='mouse'||selectMode.value)return;heldRow='';holdX=event.clientX;holdY=event.clientY;clearTimeout(holdTimer);holdTimer=setTimeout(()=>{heldRow=row.path;openRowActions(row)},500)}
+function cancelHold(){clearTimeout(holdTimer)}
+function moveHold(event:PointerEvent){if(Math.abs(event.clientX-holdX)+Math.abs(event.clientY-holdY)>12)cancelHold()}
+function tapRow(row:any){if(heldRow===row.path){heldRow='';return}void openFolder(row)}
+onDeactivated(cancelHold);onUnmounted(cancelHold)
 function openRowActions(row: any) {
   const actions: ActionSheetAction[] = []
   if (!isRowDir(row)) {
@@ -652,6 +666,9 @@ function openRowActions(row: any) {
   }
   actions.push({ name: '复制到…', callback: () => startCopyMove('copy', [row.path]) } as any)
   actions.push({ name: '移动到…', callback: () => startCopyMove('move', [row.path]) } as any)
+  actions.push({name:'分享链接',callback:()=>toolsOpen('share',[row])} as any)
+  actions.push({name:'创建压缩包',callback:()=>toolsOpen('compress',[row])} as any)
+  if(!isRowDir(row))actions.push({name:'解压到…',callback:()=>toolsOpen('extract',[row])} as any)
   actions.push({ name: '重命名', callback: () => doRename(row) } as any)
   actions.push({ name: '删除', color: '#EF4444', callback: () => doDelete(row) } as any)
   openSheet(actions)
@@ -674,6 +691,7 @@ function openMoreSheet() {
   if (path.value) {
     actions.push({ name: isFavorite(path.value) ? '取消收藏' : '收藏当前目录', callback: () => toggleFavorite(path.value) } as any)
   }
+  actions.push({name:'分享管理',callback:()=>toolsOpen('manage')} as any)
   actions.push({ name: '多选模式', callback: () => { selectMode.value = true } } as any)
   actions.push({ name: '排序', callback: openSortSheet } as any)
   if (inSearchMode.value) {
@@ -681,10 +699,25 @@ function openMoreSheet() {
   }
   openSheet(actions)
 }
+let filesActive=false,seenRevision=0,filesIdentity=JSON.stringify([dsm.baseUrl,dsm.account])
+async function refreshDirtyDirectory(){
+ if(!filesActive||loading.value||inSearchMode.value||route.path!=='/app/files')return
+ const revision=directoryRevision(path.value)
+ if(revision===seenRevision)return
+ seenRevision=revision
+ await loadCurrent()
+}
+watch(()=>directoryRevision(path.value),()=>void refreshDirtyDirectory())
+watch([loading,inSearchMode],()=>void refreshDirtyDirectory())
+watch(path,()=>{seenRevision=directoryRevision(path.value)})
+onActivated(()=>{filesActive=true;void refreshDirtyDirectory()})
+onMounted(()=>{filesActive=true;void refreshDirtyDirectory()})
+onDeactivated(()=>{filesActive=false})
+watch(operationScope,()=>{if(operationScope.value===filesIdentity)return;filesIdentity=operationScope.value;listingGeneration++;searchController?.abort();items.value=[];path.value='';selection.value=[];contextOpen.value=false;sheetOpen.value=false;if(filesActive&&dsm.sid)void loadShares()})
 </script>
 
 <template>
-  <!-- ========== 桌面端 ========== -->
+  <FileToolsDialog ref="fileTools" /><!-- ========== 桌面端 ========== -->
   <el-container v-if="!isMobile" class="page ui-files">
     <el-header>
       <div class="header">
@@ -706,7 +739,7 @@ function openMoreSheet() {
         />
         <el-button v-if="inSearchMode" @click="exitSearch">退出搜索</el-button>
         <el-button type="primary" :disabled="!searchPattern" @click="doSearch">搜索</el-button>
-        <el-button :disabled="!path || inSearchMode" @click="doCreateFolder">新建文件夹</el-button>
+        <el-button @click="toolsOpen('manage')">分享管理</el-button><el-button :disabled="!path || inSearchMode" @click="doCreateFolder">新建文件夹</el-button>
         <el-button :disabled="!canUpload" type="success" @click="triggerUpload">上传</el-button>
         <input ref="uploadInput" type="file" multiple style="display:none" @change="onUploadPicked" />
       </div>
@@ -741,7 +774,7 @@ function openMoreSheet() {
         <span>已选 {{ selection.length }} 项</span>
         <el-button size="small" @click="batchDownload">批量下载</el-button>
         <el-button size="small" @click="batchCopy">复制到…</el-button>
-        <el-button size="small" @click="batchMove">移动到…</el-button>
+        <el-button size="small" @click="batchMove">移动到…</el-button><el-button size="small" @click="toolsOpen('compress',selection)">压缩</el-button>
         <el-button size="small" type="danger" @click="batchDelete">批量删除</el-button>
       </div>
 
@@ -868,7 +901,7 @@ function openMoreSheet() {
       <div class="m-batch-info">已选 {{ selectedPaths.size }} 项</div>
       <van-button size="mini" @click="batchDownload">下载</van-button>
       <van-button size="mini" @click="batchCopy">复制</van-button>
-      <van-button size="mini" @click="batchMove">移动</van-button>
+      <van-button size="mini" @click="batchMove">移动</van-button><van-button size="mini" :disabled="!selectedRows.length" @click="toolsOpen('compress',selectedRows)">压缩</van-button>
       <van-button size="mini" type="danger" @click="batchDelete">删除</van-button>
       <van-button size="mini" plain @click="exitSelectMode">完成</van-button>
     </div>
@@ -881,7 +914,7 @@ function openMoreSheet() {
           :key="row.path"
           class="m-row"
           :class="{ 'm-row-selected': selectedPaths.has(row.path) }"
-          @click="openFolder(row)"
+          @click="tapRow(row)" @pointerdown="beginHold($event,row)" @pointerup="cancelHold" @pointercancel="cancelHold" @pointermove="moveHold" @contextmenu.prevent
         >
           <!-- 左：图标 / 缩略图 / 选择框 -->
           <div class="m-row-left">

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test scripts/*.test.mjs",
+    "test:files": "node scripts/check-file-features-browser.mjs",
     "test:heic": "node scripts/check-heic-browser.mjs",
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
@@ -23,6 +24,7 @@
     "@tauri-apps/plugin-store": "^2.4.3",
     "element-plus": "^2.14.0",
     "heic-to": "^1.6.7",
+    "hls.js": "^1.7.4",
     "pinia": "^3.0.4",
     "vant": "^4.9.24",
     "vue": "^3.5.13",

@@ -1,18 +1,32 @@
+import { version } from '../../package.json'
+import { playbackProfile, playbackUrl } from '../utils/jellyfinPlayback'
 import { fetch } from '@tauri-apps/plugin-http'
 import { imageCacheKey, readImageCache, writeImageCache } from '../utils/imageCache'
 import { jellyfinBase } from '../utils/filmMetadata'
+let installationId=''
+function deviceId(){if(installationId)return installationId;try{installationId=localStorage.getItem('synolink.jellyfin.device')||crypto.randomUUID();localStorage.setItem('synolink.jellyfin.device',installationId)}catch{installationId=crypto.randomUUID()}return installationId}
 export class JellyfinClient {
+ deviceId = deviceId()
+ headers(){return {Authorization:'MediaBrowser Client="SynoLink", Device="'+(typeof navigator!=='undefined'&&/Android/.test(navigator.userAgent)?'Android':'Desktop')+'", DeviceId="'+this.deviceId+'", Version="'+version+'"'+(this.token?', Token="'+this.token.replace(/["\\]/g,'')+'"':'')}}
+
  base: string
  token = ''
  userId = ''
  constructor(base: string) { this.base = jellyfinBase(base) }
- async request(path: string, query: Record<string, string> = {}, body?: any) {
+ async request(path: string, query: Record<string, string> = {}, body?: any, method = body === undefined ? 'GET' : 'POST') {
   const url = new URL(this.base + path)
   Object.entries(query).forEach(([k,v]) => url.searchParams.set(k,v))
-  const response = await fetch(url.href, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', Authorization: 'MediaBrowser Client="SynoLink", Device="Desktop", DeviceId="synolink-desktop", Version="0.1.13"' + (this.token ? ', Token="' + this.token.replace(/["\\]/g, '') + '"' : '') }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(20000) })
+  const response = await fetch(url.href, {method,headers:{'Content-Type':'application/json',...this.headers()},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(20000),maxRedirections:0})
   if (!response.ok) throw new Error(response.status === 401 ? 'Jellyfin 登录已失效，请重新连接' : 'Jellyfin 请求失败（HTTP ' + response.status + '）')
+  if(response.status===204)return {}
   return response.json()
  }
+ playbackInfo(id:string, options:{bitrate:number;audio?:number;subtitle?:number;sourceId?:string}) {
+  return this.request('/Items/'+encodeURIComponent(id)+'/PlaybackInfo',{}, {UserId:this.userId,DeviceProfile:playbackProfile(options.bitrate),MaxStreamingBitrate:options.bitrate,StartTimeTicks:0,IsPlayback:true,AutoOpenLiveStream:false,EnableDirectPlay:false,EnableDirectStream:false,EnableTranscoding:true,AllowVideoStreamCopy:true,AllowAudioStreamCopy:true,AudioStreamIndex:options.audio,SubtitleStreamIndex:options.subtitle??-1,MediaSourceId:options.sourceId})
+ }
+ reportPlayback(kind:'start'|'progress'|'stop', data:Record<string,unknown>){return this.request('/Sessions/Playing'+(kind==='start'?'':kind==='progress'?'/Progress':'/Stopped'),{},data)}
+ stopEncoding(sessionId:string){return this.request('/Videos/ActiveEncodings',{DeviceId:this.deviceId,PlaySessionId:sessionId},undefined,'DELETE')}
+ streamUrl(path:string){return playbackUrl(this.base,path)}
  async login(username: string, password: string) {
   const data = await this.request('/Users/AuthenticateByName', {}, { Username: username, Pw: password })
   if (!data.AccessToken || !data.User?.Id) throw new Error('登录响应缺少凭据')

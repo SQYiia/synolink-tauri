@@ -27,13 +27,13 @@ onMounted(async () => {
   if (!isTauri() || isMobileUA) return
   unlistenClose = await getCurrentWindow().onCloseRequested(async event => {
     const pending = downloadQueue.value.some(t => t.status === 'downloading' || t.status === 'queued') ||
-      fileOperations.some(t => t.status === 'running')
+      fileOperations.some(t => ['running','cancelling'].includes(t.status))
     if (!pending) return
     event.preventDefault()
     if (confirmingClose) return
     confirmingClose = true
     try {
-      if (await confirm('仍有未完成任务。关闭会中断本机传输；NAS 上的复制或移动可能继续运行。确定关闭？', '未完成任务')) {
+      if (await confirm('仍有未完成任务。关闭会中断本机传输；NAS 上的文件任务可能继续运行。确定关闭？', '未完成任务')) {
         await getCurrentWindow().destroy()
       }
     } finally { confirmingClose = false }

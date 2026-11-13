@@ -1,9 +1,14 @@
 <script setup lang="ts">
 import { isAndroid } from '../utils/platform'
-import { ref, shallowRef, onMounted, onBeforeUnmount } from 'vue'
+import { ref, shallowRef, onMounted, onBeforeUnmount, onDeactivated, defineAsyncComponent } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { dsm } from '../api/dsm'
 import { JellyfinClient } from '../api/jellyfin'
+const JellyfinPlayer = defineAsyncComponent(() => import('./JellyfinPlayer.vue'))
+import { resumeSeconds } from '../utils/jellyfinPlayback'
+const playingItem = ref<any>(), fromStart = ref(false)
+function play(restart=false){fromStart.value=restart;playingItem.value=selected.value;detailOpen.value=false}
+onDeactivated(()=>{playingItem.value=undefined})
 import JellyfinPoster from './JellyfinPoster.vue'
 const scope = JSON.stringify([dsm.baseUrl, dsm.account])
 const key = 'jellyfin:' + scope
@@ -35,7 +40,7 @@ async function connect() {
  if(valid(gen) && client.value && !settings.value) await load()
 }
 async function disconnect() {
- generation++; busy.value = false; client.value = undefined; items.value = []; selected.value = undefined; detailOpen.value = false; settings.value = true
+ generation++; busy.value = false; playingItem.value = undefined; client.value = undefined; items.value = []; selected.value = undefined; detailOpen.value = false; settings.value = true
  try { if (!isAndroid) await invoke('delete_password',{accountId:key}); localStorage.removeItem(key) } catch { error.value = '删除保存的连接失败，请重试' }
 }
 async function open(item:any) {
@@ -58,7 +63,7 @@ onMounted(async () => {
   const c = new JellyfinClient(config.base); c.token = saved.token; c.userId = saved.userId; client.value = c; settings.value = false; await load()
  } catch { error.value = '无法恢复 Jellyfin 连接，请重新登录' }
 })
-const contextTimer = setInterval(() => { if(scope !== JSON.stringify([dsm.baseUrl,dsm.account])) { generation++; client.value = undefined; items.value = []; selected.value = undefined; detailOpen.value = false; password.value = ''; busy.value = false; settings.value = true; error.value = 'NAS 账号已切换，请切换到 NAS 文件后重新打开影视库' } },500)
+const contextTimer = setInterval(() => { if(scope !== JSON.stringify([dsm.baseUrl,dsm.account])) { generation++; playingItem.value = undefined; client.value = undefined; items.value = []; selected.value = undefined; detailOpen.value = false; password.value = ''; busy.value = false; settings.value = true; error.value = 'NAS 账号已切换，请切换到 NAS 文件后重新打开影视库' } },500)
 onBeforeUnmount(() => { generation++; clearInterval(contextTimer) })
 </script>
 <template>
@@ -78,9 +83,9 @@ onBeforeUnmount(() => { generation++; clearInterval(contextTimer) })
   <p v-if="!items.length && !busy && !error" class="empty">暂无影视内容，请检查 Jellyfin 媒体库和当前账号权限。</p><p v-if="busy" class="empty">正在读取媒体库…</p><el-button v-if="items.length < total" :loading="busy" @click="load(true)">加载更多</el-button>
  </template>
  <el-dialog v-model="detailOpen" :title="selected?.Name" width="min(780px, 94vw)" destroy-on-close>
-  <div v-if="selected && client" class="detail"><JellyfinPoster :key="selected.Id" :client="client" :item="selected" /><div><p>{{ selected.ProductionYear }} <span v-if="selected.CommunityRating"> · ★ {{ Number(selected.CommunityRating).toFixed(1) }}</span><span v-if="selected.RunTimeTicks"> · {{ Math.round(selected.RunTimeTicks / 600000000) }} 分钟</span></p><p>{{ selected.Genres?.join(' / ') }}</p><el-button v-if="['Series','Season','BoxSet','Folder'].includes(selected.Type)" @click="browse">浏览季 / 剧集</el-button><h3>剧情简介</h3><p class="plot">{{ selected.Overview || '暂无简介' }}</p><h3 v-if="selected.People?.length">演职人员</h3><p>{{ selected.People?.slice(0,12).map((p:any)=>p.Name).join('、') }}</p></div></div>
+  <div v-if="selected && client" class="detail"><JellyfinPoster :key="selected.Id" :client="client" :item="selected" /><div><p>{{ selected.ProductionYear }} <span v-if="selected.CommunityRating"> · ★ {{ Number(selected.CommunityRating).toFixed(1) }}</span><span v-if="selected.RunTimeTicks"> · {{ Math.round(selected.RunTimeTicks / 600000000) }} 分钟</span></p><p>{{ selected.Genres?.join(' / ') }}</p><el-button v-if="['Series','Season','BoxSet','Folder'].includes(selected.Type)" @click="browse">浏览季 / 剧集</el-button><template v-if="['Movie','Episode','Video','MusicVideo'].includes(selected.Type)"><el-button type="primary" @click="play()">{{ resumeSeconds(selected)>0 ? '继续观看 · '+Math.floor(resumeSeconds(selected)/60)+' 分钟' : '播放' }}</el-button><el-button v-if="resumeSeconds(selected)>0" @click="play(true)">从头播放</el-button></template><h3>剧情简介</h3><p class="plot">{{ selected.Overview || '暂无简介' }}</p><h3 v-if="selected.People?.length">演职人员</h3><p>{{ selected.People?.slice(0,12).map((p:any)=>p.Name).join('、') }}</p></div></div>
  </el-dialog>
-</section>
+<JellyfinPlayer v-if="playingItem && client" :client="client" :item="playingItem" :from-start="fromStart" @close="playingItem=undefined" /></section>
 </template>
 <style scoped>
 .cinema{padding:28px 32px;max-width:1500px;margin:auto}.cinema header{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:28px}.kicker{font-size:11px;letter-spacing:2px;color:#8993a5}h2{font-size:27px;letter-spacing:-1px;margin:12px 0}header p,.connection p,.count{font-size:13px;color:var(--el-text-color-secondary)}.connection{max-width:580px;padding:26px;background:var(--el-fill-color-light);border:1px solid var(--el-border-color-lighter);border-radius:16px}.credentials{display:flex;gap:12px;margin-top:12px}.connection .el-checkbox{margin:14px 0}.toolbar,.toolbar form{display:flex;gap:12px;align-items:center;justify-content:space-between}.toolbar form{max-width:420px}.crumbs button{border:0;background:transparent;color:var(--el-text-color-primary);cursor:pointer}.wall{display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:28px 20px;margin:20px 0}.film{border:0;padding:0;background:none;text-align:left;cursor:pointer;color:var(--el-text-color-primary);min-width:0}.film strong{display:block;margin:12px 0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px}.film>span{font-size:12px;color:var(--el-text-color-secondary);display:flex;justify-content:space-between}.film b{color:#c69740}.film:hover{transform:translateY(-3px)}.notice{padding:14px;background:#fef0f0;color:#a33131;border-radius:10px;margin:18px 0}.empty{text-align:center;padding:50px;color:var(--el-text-color-secondary)}.detail{display:grid;grid-template-columns:200px 1fr;gap:28px}.plot{white-space:pre-wrap;line-height:1.8}.detail p{line-height:1.7}.detail h3{margin-top:24px}@media(max-width:700px){.cinema{padding:18px 14px}.toolbar{align-items:stretch;flex-direction:column}.wall{grid-template-columns:repeat(2,minmax(0,1fr))}.detail{grid-template-columns:110px 1fr;gap:16px}h2{font-size:22px}}

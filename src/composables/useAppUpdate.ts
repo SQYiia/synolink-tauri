@@ -45,12 +45,12 @@ export async function downloadUpdate() {
 }
 export async function installUpdate() {
   if (updates.phase !== 'ready') return
-  if (downloadQueue.value.some(t => t.status === 'downloading' || t.status === 'queued') || fileOperations.some(t => t.status === 'running')) {
+  if (downloadQueue.value.some(t => t.status === 'downloading' || t.status === 'queued') || fileOperations.some(t => ['running','cancelling'].includes(t.status))) {
     updates.error = '仍有未完成的传输或文件任务，请完成后再安装更新。'; return
   }
   if (!await confirm('将退出 SynoLink 并打开安装向导。完成安装后重新打开软件即可。', '安装更新', { confirmText: '退出并安装' })) return
   // Confirmation can stay open while another task starts.
-  if (downloadQueue.value.some(t => t.status === 'downloading' || t.status === 'queued') || fileOperations.some(t => t.status === 'running')) {
+  if (downloadQueue.value.some(t => t.status === 'downloading' || t.status === 'queued') || fileOperations.some(t => ['running','cancelling'].includes(t.status))) {
     updates.error = '有新的任务正在运行，请完成后再安装。'; return
   }
   updates.phase = 'installing'; updates.error = ''

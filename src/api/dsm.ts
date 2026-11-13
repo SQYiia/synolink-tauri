@@ -459,6 +459,34 @@ export class DsmClient {
     })
   }
 
+  /** File features require discovered APIs; never guess unsupported endpoints. */
+  async ensureFileFeature(api: string) {
+    if (!Object.keys(this.apiInfo).length) await this.loadApiInfo()
+    const info = this.apiInfo[api]
+    const supported = api === 'SYNO.FileStation.Extract' ? 2 : 3
+    if (!info || !Number.isInteger(info.minVersion) || !Number.isInteger(info.maxVersion) || info.minVersion > supported || info.maxVersion < supported) throw new Error('当前 NAS 不支持此文件操作接口')
+    return supported
+  }
+  async fileFeature(api: string, method: string, params: Record<string, any> = {}, post = false) {
+    const version = await this.ensureFileFeature(api)
+    return this.entry(api, method, { post, params: { ...params, version } })
+  }
+  shareCreate(path: string, password: string, expiry: string) {
+    return this.fileFeature('SYNO.FileStation.Sharing', 'create', { path: JSON.stringify(path), password: JSON.stringify(password), date_expired: JSON.stringify(expiry) }, true)
+  }
+  shareList(offset = 0) { return this.fileFeature('SYNO.FileStation.Sharing', 'list', { offset, limit: 50, sort_by: JSON.stringify('name'), sort_direction: JSON.stringify('asc'), force_clean: false }) }
+  shareDelete(id: string) { return this.fileFeature('SYNO.FileStation.Sharing', 'delete', { id: JSON.stringify(id) }, true) }
+  compressStart(paths: string[], destination: string, format: 'zip' | '7z', password: string) {
+    return this.fileFeature('SYNO.FileStation.Compress', 'start', { path: JSON.stringify(paths), dest_file_path: JSON.stringify(destination), format: JSON.stringify(format), level: JSON.stringify('moderate'), mode: JSON.stringify('add'), password: JSON.stringify(password) }, true)
+  }
+  extractStart(path: string, destination: string, password: string, overwrite: boolean, subfolder: boolean) {
+    return this.fileFeature('SYNO.FileStation.Extract', 'start', { file_path: JSON.stringify(path), dest_folder_path: JSON.stringify(destination), password: JSON.stringify(password), overwrite, keep_dir: true, create_subfolder: subfolder }, true)
+  }
+  fileTaskRequest(kind: 'copy' | 'move' | 'compress' | 'extract', method: 'status' | 'stop', taskid: string) {
+    const api = kind === 'compress' ? 'Compress' : kind === 'extract' ? 'Extract' : 'CopyMove'
+    return this.fileFeature('SYNO.FileStation.' + api, method, { taskid: JSON.stringify(taskid) }, method === 'stop')
+  }
+
   /** 搜索：启动任务（doc 4.15 start）
    *  注意：pattern 留空表示搜索所有文件；传 `*` 会被 DSM 当作不合法正则立即返回空。 */
   async searchStart(
