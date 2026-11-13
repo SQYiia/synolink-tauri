@@ -463,7 +463,7 @@ export class DsmClient {
   async ensureFileFeature(api: string) {
     if (!Object.keys(this.apiInfo).length) await this.loadApiInfo()
     const info = this.apiInfo[api]
-    const supported = api === 'SYNO.FileStation.Extract' ? 2 : 3
+    const supported = ['SYNO.FileStation.Extract', 'SYNO.FileStation.Rename'].includes(api) ? 2 : 3
     if (!info || !Number.isInteger(info.minVersion) || !Number.isInteger(info.maxVersion) || info.minVersion > supported || info.maxVersion < supported) throw new Error('当前 NAS 不支持此文件操作接口')
     return supported
   }
@@ -473,6 +473,9 @@ export class DsmClient {
   }
   shareCreate(path: string, password: string, expiry: string) {
     return this.fileFeature('SYNO.FileStation.Sharing', 'create', { path: JSON.stringify(path), password: JSON.stringify(password), date_expired: JSON.stringify(expiry) }, true)
+  }
+  renameChecked(path: string, name: string) {
+    return this.fileFeature('SYNO.FileStation.Rename', 'rename', { path: JSON.stringify([path]), name: JSON.stringify([name]) }, true)
   }
   shareList(offset = 0) { return this.fileFeature('SYNO.FileStation.Sharing', 'list', { offset, limit: 50, sort_by: JSON.stringify('name'), sort_direction: JSON.stringify('asc'), force_clean: false }) }
   shareDelete(id: string) { return this.fileFeature('SYNO.FileStation.Sharing', 'delete', { id: JSON.stringify(id) }, true) }

@@ -14,15 +14,22 @@ import {dsm,DsmClient} from '../src/api/dsm'
 import {fileOperations} from '../src/composables/useFileOperations'
 export async function mount(){
  dsm.baseUrl='https://fixture-nas';dsm.account='alice';dsm.sid='session'
- dsm.apiInfo=Object.fromEntries(['Sharing','Compress','Extract','CopyMove'].map(name=>['SYNO.FileStation.'+name,{path:'entry.cgi',minVersion:1,maxVersion:name==='Extract'?2:3}]))
+ dsm.apiInfo=Object.fromEntries(['Sharing','Compress','Extract','CopyMove','Rename'].map(name=>['SYNO.FileStation.'+name,{path:'entry.cgi',minVersion:1,maxVersion:['Extract','Rename'].includes(name)?2:3}]))
  const names=['Archive.zip','Notes.txt','旅行照片'.repeat(14)+'.txt']
  const files=names.map(name=>({name,path:'/share/'+name,isdir:false,additional:{size:100,time:{mtime:1700000000}}}))
  const shares=[{name:'share',path:'/share',isdir:true}]
  let links:any[]=[],createError=0,compressDone=false,taskNumber=0
  const calls:any[]=[]
+ let holdRename=false,releaseRename:()=>void=()=>{}
  DsmClient.prototype.listAll=async function(folder=''){return {success:true,data:folder?{files:[...files,...(compressDone?[{name:'New.zip',path:'/share/New.zip',isdir:false,additional:{size:100}}]:[])]}:{shares}}}
  DsmClient.prototype.entry=async function(api,method,opts){
   const params=opts?.params||{};calls.push({api,method,params})
+  if(api.endsWith('Rename')){
+   if(holdRename)await new Promise<void>(resolve=>{releaseRename=resolve})
+   const source=JSON.parse(params.path)[0],name=JSON.parse(params.name)[0],file=files.find(row=>row.path===source)
+   if(!file)return {success:false,error:{code:408}} as any
+   file.name=name;file.path='/share/'+name;return {success:true,data:{files:[{...file}]}}
+  }
   if(api.endsWith('Sharing')){
    if(method==='list')return {success:true,data:{links:links.slice(Number(params.offset),Number(params.offset)+50),total:links.length}}
    if(method==='delete'){links=links.filter(l=>l.id!==JSON.parse(params.id));return {success:true} as any}
@@ -44,5 +51,5 @@ export async function mount(){
  const app=createApp({render:()=>h('div',[h(RouterView,{}, {default:({Component}:any)=>h(KeepAlive,{},()=>Component?h(Component):null)}),h(FileOperations)])})
  app.use(createPinia());app.use(router);app.use(ElementPlus);app.use(Vant);for(const [name,icon] of Object.entries(icons))app.component(name,icon)
  await router.push('/app/files?open=/share');await router.isReady();app.mount('#app')
- return {calls,operations:fileOperations,finish:()=>{compressDone=true},pending:()=>{compressDone=false},setCreateError:(code:number)=>{createError=code},switchAccount:()=>{dsm.account='bob';dsm.sid='bob-session'},navigate:(path:string)=>router.push(path),close:()=>app.unmount()}
+ return {calls,holdRename:()=>{holdRename=true},releaseRename:()=>{holdRename=false;releaseRename()},addFile:(name:string)=>{files.push({name,path:'/share/'+name,isdir:false,additional:{size:100,time:{mtime:1700000000}}})},operations:fileOperations,finish:()=>{compressDone=true},pending:()=>{compressDone=false},setCreateError:(code:number)=>{createError=code},switchAccount:()=>{dsm.account='bob';dsm.sid='bob-session'},navigate:(path:string)=>router.push(path),close:()=>app.unmount()}
 }

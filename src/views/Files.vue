@@ -12,6 +12,12 @@ import FolderPicker from '../components/FolderPicker.vue'
 import FileTypeIcon from '../components/FileTypeIcon.vue'
 import FileContextMenu from '../components/FileContextMenu.vue'
 import FileToolsDialog from '../components/FileToolsDialog.vue'
+import BatchRenameDialog from '../components/BatchRenameDialog.vue'
+const batchRenameDialog = ref<InstanceType<typeof BatchRenameDialog>>()
+function openBatchRename(rows:any[]){
+  if(filesIdentity!==JSON.stringify([dsm.baseUrl,dsm.account])){toast('账号已切换，请等待文件列表刷新','warning');return}
+  batchRenameDialog.value?.open(rows.map(row=>({...row,isdir:isRowDir(row)})),items.value)
+}
 import { directoryRevision, operationScope } from '../composables/useFileOperations'
 const fileTools = ref<InstanceType<typeof FileToolsDialog>>()
 function toolsOpen(mode:'share'|'manage'|'compress'|'extract',rows:any[]=[]){if(filesIdentity!==JSON.stringify([dsm.baseUrl,dsm.account])){toast('账号已切换，请等待文件列表刷新','warning');return}fileTools.value?.open(mode,rows.map(r=>({...r,isdir:isRowDir(r)})))}
@@ -100,6 +106,7 @@ const contextItems = computed(() => [
   { id: 'compress', label: '创建压缩包' },
   { id: 'extract', label: '解压到…', disabled: contextRows.value.length !== 1 || isRowDir(contextRows.value[0]) },
   { id: 'rename', label: '重命名', disabled: contextRows.value.length !== 1, shortcut: 'F2' },
+  { id: 'batchRename', label: '批量重命名', disabled: contextRows.value.length < 2 },
   { id: 'delete', label: '删除', danger: true },
 ])
 function openContext(row: any, _column: any, event: MouseEvent) {
@@ -122,6 +129,7 @@ async function runContext(id: string) {
     if (id === 'copy' || id === 'move') startCopyMove(id, rows.map(item => item.path))
     if (id === 'share' || id === 'compress' || id === 'extract') toolsOpen(id, rows)
     if (id === 'rename') await doRename(row)
+    if (id === 'batchRename') openBatchRename(rows)
     if (id === 'delete') { if (rows.length === 1) await doDelete(row); else await batchDelete() }
   } catch (error: any) { toast(error?.message || '操作失败，请重试', 'error') }
 }
@@ -670,6 +678,7 @@ function openRowActions(row: any) {
   actions.push({name:'创建压缩包',callback:()=>toolsOpen('compress',[row])} as any)
   if(!isRowDir(row))actions.push({name:'解压到…',callback:()=>toolsOpen('extract',[row])} as any)
   actions.push({ name: '重命名', callback: () => doRename(row) } as any)
+  actions.push({ name: '多选', callback: () => { selectMode.value = true; selectedPaths.value = new Set([row.path]) } } as any)
   actions.push({ name: '删除', color: '#EF4444', callback: () => doDelete(row) } as any)
   openSheet(actions)
 }
@@ -717,7 +726,7 @@ watch(operationScope,()=>{if(operationScope.value===filesIdentity)return;filesId
 </script>
 
 <template>
-  <FileToolsDialog ref="fileTools" /><!-- ========== 桌面端 ========== -->
+  <FileToolsDialog ref="fileTools" /><BatchRenameDialog ref="batchRenameDialog" /><!-- ========== 桌面端 ========== -->
   <el-container v-if="!isMobile" class="page ui-files">
     <el-header>
       <div class="header">
@@ -774,6 +783,7 @@ watch(operationScope,()=>{if(operationScope.value===filesIdentity)return;filesId
         <span>已选 {{ selection.length }} 项</span>
         <el-button size="small" @click="batchDownload">批量下载</el-button>
         <el-button size="small" @click="batchCopy">复制到…</el-button>
+        <el-button size="small" @click="openBatchRename(selection)">批量重命名</el-button>
         <el-button size="small" @click="batchMove">移动到…</el-button><el-button size="small" @click="toolsOpen('compress',selection)">压缩</el-button>
         <el-button size="small" type="danger" @click="batchDelete">批量删除</el-button>
       </div>
@@ -901,6 +911,7 @@ watch(operationScope,()=>{if(operationScope.value===filesIdentity)return;filesId
       <div class="m-batch-info">已选 {{ selectedPaths.size }} 项</div>
       <van-button size="mini" @click="batchDownload">下载</van-button>
       <van-button size="mini" @click="batchCopy">复制</van-button>
+      <van-button size="mini" :disabled="!selectedRows.length" @click="openBatchRename(selectedRows)">重命名</van-button>
       <van-button size="mini" @click="batchMove">移动</van-button><van-button size="mini" :disabled="!selectedRows.length" @click="toolsOpen('compress',selectedRows)">压缩</van-button>
       <van-button size="mini" type="danger" @click="batchDelete">删除</van-button>
       <van-button size="mini" plain @click="exitSelectMode">完成</van-button>

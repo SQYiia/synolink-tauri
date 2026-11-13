@@ -28,7 +28,8 @@ const epochs=new Map<string,number>(), monitors=reactive(new Set<string>()), ses
 function invalidate(task:Operation){epochs.set(task.id,(epochs.get(task.id)||0)+1)}
 export const directoryChanges=reactive<Record<string,number>>({})
 export function directoryRevision(path:string){const parts=path.split('/').filter(Boolean);let revision=directoryChanges[JSON.stringify([dsm.baseUrl,dsm.account,'/'])]||0;for(let i=1;i<=parts.length;i++)revision+=directoryChanges[JSON.stringify([dsm.baseUrl,dsm.account,'/'+parts.slice(0,i).join('/')])]||0;return revision}
-function dirty(task:Operation){for(const path of task.directories){const key=JSON.stringify([task.sourceUrl,task.account,path]);directoryChanges[key]=(directoryChanges[key]||0)+1}}
+export function markDirectoriesChanged(sourceUrl:string,account:string,directories:string[]){for(const path of directories){const key=JSON.stringify([sourceUrl,account,path]);directoryChanges[key]=(directoryChanges[key]||0)+1}}
+function dirty(task:Operation){markDirectoriesChanged(task.sourceUrl,task.account,task.directories)}
 let previousSession=dsm.sid
 // The DSM singleton is not reactive; keep account transitions observable even with no task poll in flight.
 const contextTimer=setInterval(()=>{
