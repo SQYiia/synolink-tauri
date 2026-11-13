@@ -1,0 +1,344 @@
+[
+  {
+    "id": "active_backup_for_business",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/activebackupforbusiness.png",
+    "title": "Active Backup for Business",
+    "sha256": "57dc54c65c06f72d2f132a2b8061b88510075b0d6a85a74a5a72b41e33d0c77c"
+  },
+  {
+    "id": "active_backup_for_google_workspace",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/activebackupforgsuite.png",
+    "title": "Active Backup for Google Workspace",
+    "sha256": "c6aec7679845dc80234a9b2db57377841eb7f1ef739d263987cc294017845744"
+  },
+  {
+    "id": "active_backup_for_microsoft_365",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/activebackupforoffice365.png",
+    "title": "Active Backup for Microsoft 365",
+    "sha256": "8ae95935cb11d44133d6eee1e5bd018b76f19b544d31ace114af0aba19823072"
+  },
+  {
+    "id": "active_insight",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/activeinsight.png",
+    "title": "Active Insight",
+    "sha256": "e586a04a54e4474de06c212d9a0e6fa3e24437d72674c2d7b47c36a9dd26e5d7"
+  },
+  {
+    "id": "advanced_media_extensions",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/ame.png",
+    "title": "Advanced Media Extensions",
+    "sha256": "d6b87bda847b9bc0430130933e8d69633829ce55f7df57857a0f5c7b3a9e0483"
+  },
+  {
+    "id": "antivirus_essential",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/antivirusessential.png",
+    "title": "Antivirus Essential",
+    "sha256": "9818dcb1a9ea13a32db53d7547c21d26fdc840487056672d22747bdcb30eb43d"
+  },
+  {
+    "id": "audio_station",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/audiostation.png",
+    "title": "Audio Station",
+    "sha256": "84db57c7371665f366849a4d23c095bbec6ab42f1686193e3fafe8a5333c24b4"
+  },
+  {
+    "id": "calendar",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/calendar.png",
+    "title": "Calendar",
+    "sha256": "f0768437bb368bad36506870664e6ecd1f639b1e58ef5cb049618e11de59f6d9"
+  },
+  {
+    "id": "carddav_server",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/carddavserver.png",
+    "title": "CardDav Server",
+    "sha256": "bd7833051ead3081c890a1dd3aa8c124d85b12f9e08627f006463eb67bda9a5e"
+  },
+  {
+    "id": "chatplus",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/chatplus.png",
+    "title": "ChatPlus",
+    "sha256": "6b1a2d24217e4dd821e443812acf742525508b4df74b5e9eb3d1bf092d9aa427"
+  },
+  {
+    "id": "cloud_sync",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/cloudsync.png",
+    "title": "Cloud Sync",
+    "sha256": "bf7cac9abbc1802bc02f9fc07fef976c863d410249461090d9b000809c9473db"
+  },
+  {
+    "id": "cms",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/cms.png",
+    "title": "CMS",
+    "sha256": "1dc753f535963fb14e87bcad6dd8515c3fb14421f2d55f0cd5f7e18bfda5243e"
+  },
+  {
+    "id": "contacts",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/contacts.png",
+    "title": "Contacts",
+    "sha256": "57d5c0e60f161cd9b406bcb524d3bd3bcdb320258fa6be072b95a2418cf23bd6"
+  },
+  {
+    "id": "container_manager",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/container_manager.png",
+    "title": "Container Manager",
+    "sha256": "17499550f517c2b0679bf13e9a1f7dbd692c8697d8b1b43a37ef235aa7e1454f"
+  },
+  {
+    "id": "dhcp_server",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/dhcpserver.png",
+    "title": "DHCP Server",
+    "sha256": "c1973dc639e9f7ba66eed52a3286067f389c378d8c25c44f2ac7d18fc06d0a8c"
+  },
+  {
+    "id": "directory_server",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/directoryserver.png",
+    "title": "Directory Server",
+    "sha256": "972070704eea01f9d6d15465ac3fa4b5aaa8e1bca3bbea61d85da83e47c2a666"
+  },
+  {
+    "id": "dns_server",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/dnsserver.png",
+    "title": "DNS Server",
+    "sha256": "dc1085696c8d11c065a8427f02c1bd5fcb03bc9eb6a2697ec66bb1d89fe727f9"
+  },
+  {
+    "id": "document_viewer",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/documentviewer.png",
+    "title": "Document Viewer",
+    "sha256": "ae2547fe917c3030a6c58cc28cbd1cb984d2dffd0f238e05e9afae6896449912"
+  },
+  {
+    "id": "download_station",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/downloadstation.png",
+    "title": "Download Station",
+    "sha256": "2de70f935c02a6ab24c2c882f4a4e32ba2ba9535ea6040789b819fbadba94872"
+  },
+  {
+    "id": "drive",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/drive.png",
+    "title": "Drive",
+    "sha256": "957a7836de983d5f3eb759675438551fceaf93e7eb61de87ff14150e0372e1a6"
+  },
+  {
+    "id": "exfat",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/ex_fat.png",
+    "title": "exFAT",
+    "sha256": "12e8c9968eab08856357883445290f5e9613112cbfdfc6e2d3bbe594104a7aff"
+  },
+  {
+    "id": "file_station",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/filestation.png",
+    "title": "File Station",
+    "sha256": "7b0b4bf4a228bd89e0929ac9eea3a13a9dd44a519e66c1e60b7185aa8eb27758"
+  },
+  {
+    "id": "glacier_backup",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/glacier_backup.png",
+    "title": "Glacier Backup",
+    "sha256": "c3bf532c042d219c70367d451b46ffc7eb1d819c4a574f5fb461708da03f5608"
+  },
+  {
+    "id": "high_availability",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/ha.png",
+    "title": "High Availability",
+    "sha256": "1285c2a6b6553e75873cdb6de9ba952a471fbe4f3001f85039df0afcc0a191fe"
+  },
+  {
+    "id": "hybrid_share",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/hybridshare.png",
+    "title": "Hybrid Share",
+    "sha256": "ac138041c5867fe41b40c0301cbd30ee5b64e65c168201f52369c342b70683e9"
+  },
+  {
+    "id": "hyper_backup",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/hyperbackup.png",
+    "title": "Hyper Backup",
+    "sha256": "9484aad819b79475a8903a86bcffcfd53135acb78b9997255682cfb571c6e793"
+  },
+  {
+    "id": "hyper_backup_vault",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/hyperbackupvault.png",
+    "title": "Hyper Backup Vault",
+    "sha256": "9ef330786c008ceda74842fc7f8b932da8cfe43107ab6f3c4bacceb7e52bd07d"
+  },
+  {
+    "id": "itunes_server",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/itunesserver.png",
+    "title": "iTunes Server",
+    "sha256": "158d108e3696d469b13e715bbbd862d9d2dc85a331e120ddb24edcdf706a5cc8"
+  },
+  {
+    "id": "ldap_server",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/ldapserver.png",
+    "title": "LDAP Server",
+    "sha256": "2da6e0ceeef28c2a8f9da337ca5a17befe5f46cdcda6a17822dac107ba6d897d"
+  },
+  {
+    "id": "log_center",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/logcenter.png",
+    "title": "Log Center",
+    "sha256": "604ece02d0c15dd0450d84a5b05004a0753a8a28ee5bdb78118cda72619043e9"
+  },
+  {
+    "id": "mailplus",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/mailplus.png",
+    "title": "MailPlus",
+    "sha256": "40c629d1436fe90536d05e26f3985e5403ca696c4bdb84fea14993895d17f010"
+  },
+  {
+    "id": "mailplus_server",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/mailplusserver.png",
+    "title": "MailPlus Server",
+    "sha256": "2cab511b26cc159ceb25a4bbd2a993c79a26dbabd19f681ddc8faebf8ba1d63f"
+  },
+  {
+    "id": "media_server",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/mediaserver.png",
+    "title": "Media Server",
+    "sha256": "36411ea78e82116da16edac488271bdb07b378682776a34f4c37fa5306615985"
+  },
+  {
+    "id": "migration_assistant",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/migrationassistant.png",
+    "title": "Migration Assistant",
+    "sha256": "f1ac7a772b0c0337d18b2068118e28cd18f1ec9b39526d1da78a0c787d93f1b8"
+  },
+  {
+    "id": "note_station",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/notestation.png",
+    "title": "Note Station",
+    "sha256": "168bb9975ffe80f0929366587e64a8f4b8f28f576375f42a1062ea5efb747a1e"
+  },
+  {
+    "id": "oauth_service",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/authenticator.png",
+    "title": "OAuth Service",
+    "sha256": "0f967c0ba5bdea502f4fb83f7766005cd7d8d349dc73b1a27f096f4e1e63c4bb"
+  },
+  {
+    "id": "office",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/office.png",
+    "title": "Office",
+    "sha256": "612ccde5b713abbcc489a86162bfee9b90506dd5abeae00a3eca35a2a5970bc4"
+  },
+  {
+    "id": "proxy_server",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/proxyserver.png",
+    "title": "Proxy Server",
+    "sha256": "681992ae694dca8d5838abfa9a26b5539ed572a8969b24fdbd3bbdba4da05e00"
+  },
+  {
+    "id": "radius_server",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/radiusserver.png",
+    "title": "Radius Server",
+    "sha256": "e420707b0cc8f0ceed0cd1c820b282510ef374ffe86930bd0b2f61c0cb1ba224"
+  },
+  {
+    "id": "replication_service",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/replicationservice.png",
+    "title": "Replication Service",
+    "sha256": "f0e6be4f562f9d79057218994e437f7ea327567300cafe06d49f620ff51c03c8"
+  },
+  {
+    "id": "san_manager",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/sanmanager.png",
+    "title": "SAN Manager",
+    "sha256": "ef4f84b7489593231445031895cf6454e90f9912af6509519b03134e1f8f7360"
+  },
+  {
+    "id": "secure_signin_service",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/secure_signin_service.png",
+    "title": "Secure SignIn Service",
+    "sha256": "4f39555f9b50cc2e2f066189f4f2fab097193ca422931a2b139fb2173212d97f"
+  },
+  {
+    "id": "smb_service",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/smbservice.png",
+    "title": "SMB Service",
+    "sha256": "d902a4298797ae378191903d87c0b509a95fa9eda4483c2a359971d40c424579"
+  },
+  {
+    "id": "snapshot_replication",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/snapshotreplication.png",
+    "title": "Snapshot Replication",
+    "sha256": "efb917d7f3caa18f11907872797d32840730c243b99d26a131c19a035e51db0a"
+  },
+  {
+    "id": "sso_server",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/ssoserver.png",
+    "title": "SSO Server",
+    "sha256": "531d02035df08d43104ac8d4741e9e14992e7e0ebe1b0f956d904757035d2016"
+  },
+  {
+    "id": "storage_analyzer",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/storageanalyzer.png",
+    "title": "Storage Analyzer",
+    "sha256": "31cb454171077da0eb9f975bcf274fbbdb49d51909fed9b299b5ed1f2d064f84"
+  },
+  {
+    "id": "surveillance_station",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/surveillance.png",
+    "title": "Surveillance Station",
+    "sha256": "9ba542042fb58cee63500c8cabdcacb4d45e39fce04f78bec4f3a1c4081447ba"
+  },
+  {
+    "id": "synology_application_service",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/synologyapplicationservice.png",
+    "title": "Synology Application Service",
+    "sha256": "177aec6ee60b2f34ea823255b97e35e1079b5264f40eb0733a160226b03dc530"
+  },
+  {
+    "id": "synology_photos",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/photos.png",
+    "title": "Synology Photos",
+    "sha256": "7e50b1585ae1d78e4b5c678112d2afc4d0fb8021886f956cb780b4523e43eb22"
+  },
+  {
+    "id": "text_editor",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/texteditor.png",
+    "title": "Text Editor",
+    "sha256": "8c576e1dbe9432d2702b815f0a51ae14fab19b00725cc3421abf17d5a2147bb6"
+  },
+  {
+    "id": "universal_search",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/universalsearch.png",
+    "title": "Universal Search",
+    "sha256": "21db942d5cddecfdc55fa6c1fca07eb940865ba5109d289f0c3a6af0c999c4de"
+  },
+  {
+    "id": "usb_copy",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/usbcopy.png",
+    "title": "USB Copy",
+    "sha256": "d67c5582111a2ef8c66046b8bb78a22a72ba92161693ee98d38a7ecbf7c534c4"
+  },
+  {
+    "id": "video_station",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/videostation.png",
+    "title": "Video Station",
+    "sha256": "e25bd6a5f46115164544c34e0a42e2e47f9b0a289964841c16e9b3236d4a4f94"
+  },
+  {
+    "id": "virtual_machine_manager",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/vmm.png",
+    "title": "Virtual Machine Manager",
+    "sha256": "eb38b984276d314353bc1e66f15f30812de7c623afbe705194a0f023affe444d"
+  },
+  {
+    "id": "vpn_server",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/vpnserver.png",
+    "title": "VPN Server",
+    "sha256": "aff354e9f8fccf758813d151c68dc7bd54ea170b8cd42852b80c734c671badb1"
+  },
+  {
+    "id": "web_station",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/webstation.png",
+    "title": "Web Station",
+    "sha256": "5df5968a9b819a4182632fbe8fd7ff53660deb9a15c813c2bbc909446dce8c3b"
+  },
+  {
+    "id": "webdav",
+    "source": "https://design.synology.com/assets/guidelines/resources/package_icons/dsm/thumbnails/webdav.png",
+    "title": "WebDav",
+    "sha256": "d5df55174b08a30a36537e70ea55a938f3345e8d2e2d596fac78e584c5cfd6ca"
+  }
+]
