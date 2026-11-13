@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { onMounted as mountTransfer, onUnmounted as unmountTransfer } from 'vue'
 import { invoke as invokeDelivery } from '@tauri-apps/api/core'
+import { listen as listenBackup, type UnlistenFn as BackupUnlisten } from '@tauri-apps/api/event'
+let backupUnlisten:BackupUnlisten|undefined
+onUnmounted(()=>backupUnlisten?.())
 import { isAndroid } from '../utils/platform'
 async function deliver(id:string,share:boolean){try{await invokeDelivery('deliver_download',{taskId:id,share})}catch{alert('文件导出失败，请检查文件状态或存储权限')}}
 
@@ -86,6 +89,7 @@ onMounted(async () => {
       ElMessage.warning('需要重新登录或完成两步验证')
       await router.replace(`/login/${app.currentServerId}`)
     }
+    if(ok && isAndroid)void invokeDelivery("photo_backup_action",{action:"resume",config:null,sourceUrl:dsm.baseUrl,sourceAccount:dsm.account}).catch(()=>{})
     return ok
   })
 
@@ -103,6 +107,7 @@ onMounted(async () => {
     ElMessage.success({ message: '会话已自动恢复', duration: 2000 })
   }
   booting.value = false
+  if(isAndroid){backupUnlisten=await listenBackup("photo-backup:open",()=>void router.push("/app/backups"));void invokeDelivery("photo_backup_action",{action:"resume",config:null,sourceUrl:dsm.baseUrl,sourceAccount:dsm.account}).catch(()=>{})}
 })
 
 const desktopTabs = [

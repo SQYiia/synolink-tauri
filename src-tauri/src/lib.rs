@@ -1,3 +1,4 @@
+mod photo_backup;
 mod native_downloads;
 mod delivery;
 mod updater;
@@ -72,7 +73,8 @@ fn write_cancels(state: &AppState) -> std::sync::RwLockWriteGuard<'_, HashMap<St
 }
 
 #[tauri::command]
-fn set_session(
+async fn set_session(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     base_url: String,
     sid: String,
@@ -80,7 +82,9 @@ fn set_session(
     account: String,
     allow_insecure: bool,
     media_scope: String,
-) {
+) -> Result<(), String> {
+    let _gate = photo_backup::SESSION_GATE.lock().await;
+    photo_backup::invalidate(&app).await;
     let mut s = write_session(&state);
     s.base_url = base_url.trim_end_matches('/').to_string();
     s.sid = sid;
@@ -88,12 +92,16 @@ fn set_session(
     s.account = account;
     s.allow_insecure = allow_insecure;
     s.media_scope = media_scope;
+    Ok(())
 }
 
 #[tauri::command]
-fn clear_session(state: tauri::State<'_, AppState>) {
+async fn clear_session(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let _gate = photo_backup::SESSION_GATE.lock().await;
+    photo_backup::invalidate(&app).await;
     let mut s = write_session(&state);
     *s = Session::default();
+    Ok(())
 }
 
 fn credential(account_id: &str) -> Result<keyring::Entry, String> {
@@ -997,6 +1005,7 @@ pub fn run() {
         .setup(|app|{native_downloads::setup(app.handle());Ok(())})
         .manage(delivery::Completed::default())
         .plugin(delivery::init())
+        .plugin(photo_backup::init())
         .manage(AppState::default())
         .manage(updater::UpdateState::default())
         .plugin(tauri_plugin_opener::init())
@@ -1005,6 +1014,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .register_asynchronous_uri_scheme_protocol("dsm", dsm_protocol)
         .invoke_handler(tauri::generate_handler![
+            photo_backup::photo_backup_action,
             native_downloads::native_download_remove,
             native_downloads::native_download_add,
             native_downloads::native_download_cancel,

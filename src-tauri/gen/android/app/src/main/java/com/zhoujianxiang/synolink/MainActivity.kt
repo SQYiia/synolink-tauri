@@ -12,6 +12,7 @@ class MainActivity : TauriActivity() {
 
   override fun onNewIntent(intent: android.content.Intent) {
     super.onNewIntent(intent)
+    if (intent.getBooleanExtra("synolink_photo_backup", false)) PhotoBackupPlugin.callback?.send(app.tauri.plugin.JSObject().put("reason", "open"))
     if (intent.getBooleanExtra("synolink_transfers", false)) DownloadService.callback?.send(app.tauri.plugin.JSObject().put("reason", "open"))
   }
 
