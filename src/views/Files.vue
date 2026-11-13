@@ -64,6 +64,7 @@ function onSortChange({ prop, order }: { prop: string; order: string | null }) {
 }
 const crumbs = ref<string[]>([])
 const address = ref('')
+const addressOpen = ref(false)
 const uploadInput = ref<HTMLInputElement | null>(null)
 
 const thumbs = ref<Record<string, string>>({})
@@ -732,29 +733,32 @@ watch(operationScope,()=>{if(operationScope.value===filesIdentity)return;filesId
   <FileToolsDialog ref="fileTools" /><BatchRenameDialog ref="batchRenameDialog" /><RecycleBinDialog ref="recycleBin" /><!-- ========== 桌面端 ========== -->
   <el-container v-if="!isMobile" class="page ui-files">
     <el-header>
-      <div class="header">
-        <h2 class="page-title">文件</h2>
-        <el-breadcrumb separator="/" style="flex: 1; margin: 0 12px;">
+      <div class="file-heading">
+        <div><h2 class="page-title">文件</h2><p>浏览、整理和分享 NAS 中的文件</p></div>
+        <div class="file-heading-actions"><el-button text @click="recycleBin?.open()"><el-icon><Delete /></el-icon>回收站</el-button><el-button text @click="toolsOpen('manage')"><el-icon><Connection /></el-icon>分享管理</el-button><el-button :disabled="!path || inSearchMode" @click="doCreateFolder"><el-icon><Plus /></el-icon>新建文件夹</el-button><el-button :disabled="!canUpload" type="primary" @click="triggerUpload"><el-icon><Upload /></el-icon>上传</el-button></div>
+      </div>
+      <div class="file-location-bar">
+        <el-button circle :disabled="!path" aria-label="返回上级目录" @click="goUp"><el-icon><ArrowLeft /></el-icon></el-button>
+        <el-breadcrumb separator="/">
           <el-breadcrumb-item><a @click="loadShares">共享文件夹</a></el-breadcrumb-item>
           <el-breadcrumb-item v-for="(c, i) in crumbs" :key="c"><a @click="crumbJump(i)">{{ c }}</a></el-breadcrumb-item>
         </el-breadcrumb>
-        <el-input v-model="address" placeholder="输入目录路径后回车" style="width: 200px; margin-right: 8px" @keyup.enter="openFolder({ path: address, isdir: true })" />
+        <el-button text :aria-expanded="addressOpen" @click="addressOpen=!addressOpen">路径</el-button>
         <el-button v-if="path" :type="isFavorite(path) ? 'warning' : undefined" circle size="small" @click="toggleFavorite(path)" title="收藏当前目录">
           <el-icon><Star /></el-icon>
         </el-button>
-        <el-input
+        <div class="file-search-group"><el-input
           v-model="searchPattern"
           placeholder="搜索（当前目录递归）"
-          style="width: 220px; margin-right: 8px;"
+          aria-label="搜索当前目录"
           clearable
           @keyup.enter="doSearch"
         />
         <el-button v-if="inSearchMode" @click="exitSearch">退出搜索</el-button>
-        <el-button type="primary" :disabled="!searchPattern" @click="doSearch">搜索</el-button>
-        <el-button @click="recycleBin?.open()">回收站</el-button><el-button @click="toolsOpen('manage')">分享管理</el-button><el-button :disabled="!path || inSearchMode" @click="doCreateFolder">新建文件夹</el-button>
-        <el-button :disabled="!canUpload" type="success" @click="triggerUpload">上传</el-button>
+        <el-button :disabled="!searchPattern" @click="doSearch">搜索</el-button></div>
         <input ref="uploadInput" type="file" multiple style="display:none" @change="onUploadPicked" />
       </div>
+      <el-input v-if="addressOpen" v-model="address" class="file-address" aria-label="目录路径" placeholder="输入目录路径后回车" @keyup.enter="openFolder({ path: address, isdir: true })" />
     </el-header>
 
     <div class="favorites-bar" v-if="favorites.length">
@@ -806,7 +810,7 @@ watch(operationScope,()=>{if(operationScope.value===filesIdentity)return;filesId
             <el-icon v-else :size="28"><Document /></el-icon>
           </template>
         </el-table-column>
-        <el-table-column prop="name" label="名称" sortable="custom" />
+        <el-table-column prop="name" label="名称" sortable="custom" min-width="180" show-overflow-tooltip />
         <el-table-column prop="size" label="大小" width="110" sortable="custom">
           <template #default="{ row }">{{ isRowDir(row) ? '—' : formatBytes(row.additional?.size) }}</template>
         </el-table-column>
@@ -819,7 +823,7 @@ watch(operationScope,()=>{if(operationScope.value===filesIdentity)return;filesId
           <template #default="{ row }"><button class="file-more" aria-label="更多文件操作" title="更多操作（也可右键）" @click.stop="openContext(row, null, $event)"><el-icon><MoreFilled /></el-icon></button></template>
         </el-table-column>
       </el-table>
-      <div class="file-context-hint">右键文件可进行复制、移动、重命名等操作 · 双击打开</div>
+      <div class="file-context-hint"><span>{{items.length}} 个项目<span v-if="selection.length">，已选 {{selection.length}} 项</span></span><span>右键显示操作菜单 · 双击打开</span><button @click="loadCurrent" :disabled="loading">刷新</button></div>
       <FileContextMenu :open="contextOpen" :x="contextPoint.x" :y="contextPoint.y" :title="contextRows.length > 1 ? `已选择 ${contextRows.length} 项` : contextRows[0]?.name || ''" :items="contextItems" @close="contextOpen = false" @select="runContext" />
     </el-main>
 

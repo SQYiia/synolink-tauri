@@ -15,7 +15,7 @@ try{
  const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];page.on('pageerror',e=>errors.push(e.message))
  await page.goto('http://127.0.0.1:'+server.address().port);await page.evaluate(async()=>{window.fixture=await(await import('/fixture.js')).mount()})
  const row=name=>page.locator('.el-table__row').filter({hasText:name})
- async function menu(name,action){await row(name).click({button:'right'});await page.getByRole('menuitem',{name:action,exact:true}).click()}
+ async function menu(name,action){await page.locator('.el-overlay-dialog:visible').waitFor({state:'hidden'});await row(name).click({button:'right'});await page.getByRole('menuitem',{name:action,exact:true}).click()}
  await menu('Notes.txt','分享链接');const password=await page.getByRole('textbox',{name:'分享密码'}).inputValue();assert.match(password,/^[A-Za-z0-9]{12}$/)
  await page.getByRole('button',{name:'创建分享链接',exact:true}).click();await page.getByRole('textbox',{name:'分享地址'}).waitFor();await page.getByRole('button',{name:'复制分享信息'}).click();assert.match(await page.getByRole('textbox',{name:'可复制的分享信息'}).inputValue(),/https:\/\/fixture-nas\/sharing\/1/)
  assert.equal(await page.evaluate(secret=>JSON.stringify(localStorage).includes(secret),password),false)

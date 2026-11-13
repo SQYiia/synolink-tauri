@@ -111,6 +111,7 @@ onMounted(async () => {
 })
 
 const desktopTabs = [
+  { to: '/app/dashboard', label: '概览', icon: 'HomeFilled', group: '工作区' },
   { to: '/app/applications', label: '应用中心', icon: 'Grid' },
   { to: '/app/files', label: '文件', icon: 'Folder' },
   { to: '/app/album', label: '相册', icon: 'Picture' },
@@ -120,6 +121,16 @@ const desktopTabs = [
   { to: '/app/vmm', label: '虚拟机', icon: 'Monitor' },
   { to: '/app/me', label: '设置', icon: 'User' },
 ]
+const desktopGroups = [
+  { label:'工作区', paths:['dashboard','files','drive','backups'] },
+  { label:'媒体资料', paths:['album','videos'] },
+  { label:'NAS 管理', paths:['applications','downloads','monitor','containers','vmm'] },
+].map(group=>({...group,items:group.paths.map(path=>desktopTabs.find(tab=>tab.to==='/app/'+path)||({to:'/app/'+path,label:({drive:'Drive 文件',backups:'备份中心',containers:'容器管理'} as Record<string,string>)[path],icon:path==='drive'?'Folder':path==='backups'?'Connection':'Box'}))}))
+const desktopServer = computed(()=>app.servers.find(server=>server.id===app.currentServerId)?.name || '当前 NAS')
+const desktopAccount = computed(()=>app.accounts.find(account=>account.id===app.currentAccountId)?.account || dsm.account || '当前账号')
+function desktopShortcut(event:KeyboardEvent){if(!isMobile.value&&(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'){event.preventDefault();globalSearchOpen.value=true}}
+onMounted(()=>window.addEventListener('keydown',desktopShortcut))
+onUnmounted(()=>window.removeEventListener('keydown',desktopShortcut))
 
 const mobileTabs = [
   { to: '/app/dashboard', label: '首页', icon: 'wap-home-o' },
@@ -167,10 +178,12 @@ function onTabChange(i: number) {
   <!-- ========== 桌面端 ========== -->
   <div v-if="!isMobile" class="app-shell">
     <aside class="sidebar">
-      <RouterLink class="sidebar-brand" to="/app/dashboard" aria-label="SynoLink 首页"><span class="brand-mark">S</span><strong>SynoLink</strong></RouterLink>
-      <div class="sidebar-nav">
+      <RouterLink class="sidebar-brand" to="/app/dashboard" aria-label="SynoLink 首页"><span class="brand-mark"><el-icon><Connection /></el-icon></span><strong>SynoLink</strong></RouterLink>
+      <RouterLink class="desktop-server" to="/servers" title="管理服务器"><el-icon><Monitor /></el-icon><span><strong>{{desktopServer}}</strong><small>{{desktopAccount}}</small></span><el-icon class="server-chevron"><ArrowRight /></el-icon></RouterLink>
+      <nav class="sidebar-nav" aria-label="主导航">
+       <section v-for="group in desktopGroups" :key="group.label" class="nav-group"><h2>{{group.label}}</h2>
         <RouterLink
-          v-for="t in desktopTabs"
+          v-for="t in group.items"
           :key="t.to"
           :to="t.to"
           class="nav-item"
@@ -181,19 +194,22 @@ function onTabChange(i: number) {
           </el-icon>
           <span>{{ t.label }}</span>
         </RouterLink>
-      </div>
+       </section>
+      </nav>
       <div class="sidebar-bottom">
-        <a class="nav-item" @click="globalSearchOpen = true">
+        <button class="nav-item" @click="globalSearchOpen = true">
           <el-icon :size="20"><Search /></el-icon>
           <span>搜索</span>
-        </a>
-        <a class="nav-item" @click="downloadDrawerOpen = true">
+        </button>
+        <button class="nav-item" @click="downloadDrawerOpen = true">
           <el-icon :size="20"><Download /></el-icon>
-          <span>下载</span>
-        </a>
+          <span>传输中心</span>
+        </button>
+        <RouterLink class="nav-item" active-class="active" to="/app/me"><el-icon :size="20"><User /></el-icon><span>设置</span></RouterLink>
       </div>
     </aside>
     <main class="content">
+      <header class="desktop-topbar"><div><span>{{desktopServer}}</span><el-icon><ArrowRight /></el-icon><strong>{{navTitle}}</strong></div><button class="desktop-search" @click="globalSearchOpen=true"><el-icon><Search /></el-icon><span>搜索 NAS 文件</span><kbd>Ctrl K</kbd></button></header>
       <div v-if="booting" class="booting">
         <el-icon class="is-loading" :size="20"><Loading /></el-icon>
         <span>正在恢复会话…</span>

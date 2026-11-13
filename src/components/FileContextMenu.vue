@@ -16,7 +16,7 @@ function keys(event: KeyboardEvent) {
   const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length
   buttons[next]?.focus()
 }
-function detach() { window.removeEventListener('pointerdown', outside); window.removeEventListener('resize', close); window.removeEventListener('scroll', outside, true) }
+function detach() { window.removeEventListener('pointerdown', outside); window.removeEventListener('resize', close); window.removeEventListener('wheel', outside, true) }
 watch(() => [props.open, props.x, props.y] as const, async ([open], old) => {
   detach()
   if (!open) { previous?.focus({ preventScroll: true }); return }
@@ -25,8 +25,11 @@ watch(() => [props.open, props.x, props.y] as const, async ([open], old) => {
   if (!props.open || !menu.value) return
   const rect = menu.value.getBoundingClientRect()
   position.value = { left: Math.max(8, Math.min(props.x, innerWidth - rect.width - 8)) + 'px', top: Math.max(8, Math.min(props.y, innerHeight - rect.height - 8)) + 'px' }
-  menu.value.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
-  window.addEventListener('pointerdown', outside); window.addEventListener('resize', close); window.addEventListener('scroll', outside, true)
+  await nextTick()
+  if (!props.open || !menu.value) return
+  menu.value.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({ preventScroll: true })
+  // Programmatic scrolling when a dialog returns focus must not dismiss a newly opened menu.
+  window.addEventListener('pointerdown', outside); window.addEventListener('resize', close); window.addEventListener('wheel', outside, {capture:true,passive:true})
 })
 onBeforeUnmount(detach)
 </script>

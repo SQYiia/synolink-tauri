@@ -159,3 +159,4 @@ onMounted(() => {
 
 <style src="./styles/base.css"></style>
 <style src="./styles/polish.css"></style>
+<style src="./styles/desktop.css"></style>
