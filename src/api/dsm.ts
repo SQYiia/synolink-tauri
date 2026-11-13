@@ -463,7 +463,7 @@ export class DsmClient {
   async ensureFileFeature(api: string) {
     if (!Object.keys(this.apiInfo).length) await this.loadApiInfo()
     const info = this.apiInfo[api]
-    const supported = ['SYNO.FileStation.Extract', 'SYNO.FileStation.Rename'].includes(api) ? 2 : 3
+    const supported = ['SYNO.FileStation.Extract', 'SYNO.FileStation.Rename', 'SYNO.FileStation.List', 'SYNO.FileStation.Delete'].includes(api) ? 2 : 3
     if (!info || !Number.isInteger(info.minVersion) || !Number.isInteger(info.maxVersion) || info.minVersion > supported || info.maxVersion < supported) throw new Error('当前 NAS 不支持此文件操作接口')
     return supported
   }

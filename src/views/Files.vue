@@ -13,6 +13,8 @@ import FileTypeIcon from '../components/FileTypeIcon.vue'
 import FileContextMenu from '../components/FileContextMenu.vue'
 import FileToolsDialog from '../components/FileToolsDialog.vue'
 import BatchRenameDialog from '../components/BatchRenameDialog.vue'
+import RecycleBinDialog from '../components/RecycleBinDialog.vue'
+const recycleBin = ref<InstanceType<typeof RecycleBinDialog>>()
 const batchRenameDialog = ref<InstanceType<typeof BatchRenameDialog>>()
 function openBatchRename(rows:any[]){
   if(filesIdentity!==JSON.stringify([dsm.baseUrl,dsm.account])){toast('账号已切换，请等待文件列表刷新','warning');return}
@@ -701,6 +703,7 @@ function openMoreSheet() {
     actions.push({ name: isFavorite(path.value) ? '取消收藏' : '收藏当前目录', callback: () => toggleFavorite(path.value) } as any)
   }
   actions.push({name:'分享管理',callback:()=>toolsOpen('manage')} as any)
+  actions.push({name:'回收站',callback:()=>recycleBin.value?.open()} as any)
   actions.push({ name: '多选模式', callback: () => { selectMode.value = true } } as any)
   actions.push({ name: '排序', callback: openSortSheet } as any)
   if (inSearchMode.value) {
@@ -726,7 +729,7 @@ watch(operationScope,()=>{if(operationScope.value===filesIdentity)return;filesId
 </script>
 
 <template>
-  <FileToolsDialog ref="fileTools" /><BatchRenameDialog ref="batchRenameDialog" /><!-- ========== 桌面端 ========== -->
+  <FileToolsDialog ref="fileTools" /><BatchRenameDialog ref="batchRenameDialog" /><RecycleBinDialog ref="recycleBin" /><!-- ========== 桌面端 ========== -->
   <el-container v-if="!isMobile" class="page ui-files">
     <el-header>
       <div class="header">
@@ -748,7 +751,7 @@ watch(operationScope,()=>{if(operationScope.value===filesIdentity)return;filesId
         />
         <el-button v-if="inSearchMode" @click="exitSearch">退出搜索</el-button>
         <el-button type="primary" :disabled="!searchPattern" @click="doSearch">搜索</el-button>
-        <el-button @click="toolsOpen('manage')">分享管理</el-button><el-button :disabled="!path || inSearchMode" @click="doCreateFolder">新建文件夹</el-button>
+        <el-button @click="recycleBin?.open()">回收站</el-button><el-button @click="toolsOpen('manage')">分享管理</el-button><el-button :disabled="!path || inSearchMode" @click="doCreateFolder">新建文件夹</el-button>
         <el-button :disabled="!canUpload" type="success" @click="triggerUpload">上传</el-button>
         <input ref="uploadInput" type="file" multiple style="display:none" @change="onUploadPicked" />
       </div>
