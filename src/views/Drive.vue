@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WorkspaceHeader from '../components/WorkspaceHeader.vue'
 import { computed, onActivated, onDeactivated, ref } from 'vue'
 import { dsm } from '../api/dsm'
 import { apiError } from '../utils/packages'
@@ -32,7 +33,7 @@ function back() {trail.value.pop();query.value='';load()}
 onActivated(()=>load(offset.value)); onDeactivated(()=>{generation++;busy.value=false;selected.value=null})
 </script>
 <template>
-<section class="drive-page"><header><div><small>SYNOLOGY DRIVE</small><h1>Drive 文件</h1><p>个人文件与团队文件夹</p></div><el-button :loading="busy" @click="load(offset)">刷新</el-button></header>
+<section class="drive-page"><WorkspaceHeader title="Drive 文件" description="浏览个人文件与团队共享资料。"><el-button :loading="busy" @click="load(offset)">刷新</el-button></WorkspaceHeader>
 <el-alert v-if="error" :title="error" type="warning" :closable="false" show-icon />
 <div class="drive-toolbar"><el-radio-group v-model="mode" @change="root"><el-radio-button value="personal">我的文件</el-radio-button><el-radio-button value="teams">团队文件夹</el-radio-button></el-radio-group><el-input v-model="query" placeholder="筛选当前页文件" aria-label="筛选 Drive 文件" clearable /></div>
 <nav><el-button :disabled="!trail.length || busy" @click="back">上一级</el-button><el-button link @click="root">{{mode === 'teams' ? '团队文件夹' : '我的文件'}}</el-button><span v-for="part in trail" :key="part.id">/ {{part.name}}</span></nav>

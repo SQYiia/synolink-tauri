@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WorkspaceHeader from '../components/WorkspaceHeader.vue'
 import PhotoBackupPanel from '../components/PhotoBackupPanel.vue'
 import { computed, onActivated, onDeactivated, onUnmounted, ref } from 'vue'
 import { dsm } from '../api/dsm'
@@ -55,7 +56,7 @@ onActivated(()=>{active=true;refresh();clearInterval(timer);timer=setInterval(()
 onDeactivated(stop);onUnmounted(stop)
 </script>
 <template>
-<section class="backup-page"><PhotoBackupPanel/><header><div><small>DATA PROTECTION</small><h1>备份中心</h1><p>任务状态与最近执行结果<span v-if="updated"> · 读取于 {{updated}}</span></p></div><el-button :loading="busy" @click="refresh">刷新任务</el-button></header>
+<section class="backup-page"><WorkspaceHeader title="备份中心" :description="'查看备份任务与最近执行结果'+(updated?'，更新于 '+updated:'')"><el-button :loading="busy" @click="refresh">刷新任务</el-button></WorkspaceHeader><PhotoBackupPanel/>
 <el-alert v-for="message in errors" :key="message" :title="message" type="warning" :closable="false" show-icon />
 <el-alert v-if="unavailable.length" :title="unavailable.join('、') + ' 的任务接口不可用，请检查对应套件是否已安装并启用。'" type="info" :closable="false" show-icon />
 <div class="backup-toolbar"><el-input v-model="query" placeholder="搜索备份任务" aria-label="搜索备份任务" clearable/><span>{{tasks.length}} 个已读取任务</span></div>

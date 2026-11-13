@@ -2,6 +2,7 @@
 import { computed, onActivated, onDeactivated, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import PackageCenter from '../components/PackageCenter.vue'
+import WorkspaceHeader from '../components/WorkspaceHeader.vue'
 import { packageResult } from '../utils/packageManagement'
 import { confirm } from '../utils/feedback'
 import { dsm } from '../api/dsm'
@@ -59,7 +60,8 @@ onDeactivated(() => { active=false; generation++; busy.value = false; detailOpen
 </script>
 <template>
   <section class="apps-page">
-    <header><div><span class="eyebrow">NAS WORKSPACE</span><h1>套件中心</h1><p>安装、更新和卸载 NAS 套件。</p></div><el-button :loading="busy" @click="refresh">刷新套件</el-button></header>
+    <WorkspaceHeader title="套件中心" description="管理 NAS 应用，让设备发挥更多作用。"><el-button :loading="busy" @click="refresh"><el-icon><Refresh /></el-icon>刷新套件</el-button></WorkspaceHeader>
+    <div class="package-overview"><div><strong>{{packages.length}}</strong><span>已安装套件</span></div><div><strong>{{packages.filter(p=>p.status==='running').length}}</strong><span>正在运行</span></div><div><strong>{{packages.filter(p=>!!entry(p)).length}}</strong><span>可在 SynoLink 中使用</span></div></div>
     <el-alert v-if="error" :title="error" type="warning" :closable="false" show-icon />
     <PackageCenter :installed="packages" :capabilities="capabilities" @changed="refresh" />
     <el-alert v-if="outcome" :title="outcome" type="info" :closable="false" />

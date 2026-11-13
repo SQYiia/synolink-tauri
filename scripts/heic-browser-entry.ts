@@ -10,11 +10,15 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 import { createApp, h, ref } from 'vue'
 import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
+import 'element-plus/theme-chalk/dark/css-vars.css'
 import { Close, Download, Delete, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import PhotoViewer from '../src/components/PhotoViewer.vue'
 import { dsm } from '../src/api/dsm'
 import '../src/styles/base.css'
 import '../src/styles/polish.css'
+import '../src/styles/desktop.css'
+import '../src/styles/workspace-pages.css'
+import Me from '../src/views/Me.vue'
 import { createPinia } from 'pinia'
 import { useAppStore } from '../src/stores/app'
 import AppShell from '../src/layouts/AppShell.vue'
@@ -110,7 +114,9 @@ export async function showWorkspace(initialPhotoCount = 1) {
   store.load = async () => {}
   store.accounts = [{ id: 'fixture', account: 'alice', serverId: 'fixture', rememberPassword: false }]
   store.currentAccountId = 'fixture'
+  store.currentServerId='fixture';store.servers=[{id:'fixture',name:'家庭 NAS',protocol:'https',host:'nas',port:5001,createTime:0}]
   const router = createRouter({ history: createMemoryHistory(), routes: [
+    {path:'/app/me',component:Me,meta:{title:'设置'}},
     { path: '/app/album', component: Album }, { path: '/app/videos', component: Videos }, { path: '/app/drive', component: Drive }, { path: '/app/backups', component: Backups }, { path: '/app/applications', component: Applications }, { path: '/app/containers', component: Containers }, { path: '/app/dashboard', component: Dashboard }, { path: '/app/files', component: Files }, { path: '/app/vmm', component: Vmm }, { path: '/app/diagnostics', component: Diagnostics }, { path: '/app/monitor', component: Monitor }, { path: '/app/downloads', component: Downloads },
   ] })
   app.use(router); await router.push('/app/dashboard'); await router.isReady(); app.mount(root)

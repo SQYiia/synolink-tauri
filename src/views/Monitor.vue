@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WorkspaceHeader from '../components/WorkspaceHeader.vue'
 import { useRouter } from 'vue-router'
 import { onMounted, ref } from 'vue'
 import { dsm } from '../api/dsm'
@@ -45,10 +46,7 @@ function pctColor(p: number) {
 <template>
   <!-- 桌面端 -->
   <div v-if="!isMobile" class="mon-page" v-loading="m.loading.value">
-    <header class="mon-head">
-      <h2 class="mon-title">性能监控</h2>
-      <span class="mon-sub">{{ m.lastUpdate.value || '—' }}</span>
-    </header>
+    <WorkspaceHeader title="性能监控" description="关注资源占用、存储空间与磁盘健康。"><span class="monitor-updated">{{m.lastUpdate.value ? '更新于 '+m.lastUpdate.value : '等待数据'}}</span></WorkspaceHeader>
 
     <!-- 状态卡片 -->
     <div class="grid">

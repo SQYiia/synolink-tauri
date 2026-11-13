@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WorkspaceHeader from '../components/WorkspaceHeader.vue'
 import { updates, updateSupported, setAutomatic, checkForUpdates } from '../composables/useAppUpdate'
 import { onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -258,7 +259,7 @@ function onThemeSelect(_a: ActionSheetAction, idx: number) {
 <template>
   <!-- 桌面端 -->
   <div v-if="!isMobile" class="page ui-settings" v-loading="loading">
-    <el-button @click="router.push('/app/diagnostics')">连接诊断</el-button>
+    <WorkspaceHeader title="设置" description="账号、设备信息与应用偏好。"><el-button @click="router.push('/app/diagnostics')">连接诊断</el-button></WorkspaceHeader>
     <div class="profile">
       <div class="profile-left">
         <div class="avatar">
@@ -275,7 +276,7 @@ function onThemeSelect(_a: ActionSheetAction, idx: number) {
     </div>
 
     <div class="section-title">
-      <span>SYSTEM STATUS</span>
+      <span>设备状态</span>
       <span class="right">{{ lastUpdate || '—' }}</span>
     </div>
     <div class="grid">
@@ -292,7 +293,7 @@ function onThemeSelect(_a: ActionSheetAction, idx: number) {
       <div class="stat-card">
         <div class="stat-accent accent-indigo"></div>
         <div class="stat-body">
-          <div class="stat-label">MEMORY</div>
+          <div class="stat-label">内存</div>
           <div class="stat-number">{{ memPct }}<span class="stat-unit">%</span></div>
           <div class="stat-detail">{{ formatBytes(memUsed) }} / {{ formatBytes(memTotal) }}</div>
           <svg v-if="memHistory.length > 1" class="sparkline" viewBox="0 0 120 30" preserveAspectRatio="none">
@@ -303,7 +304,7 @@ function onThemeSelect(_a: ActionSheetAction, idx: number) {
       <div class="stat-card">
         <div class="stat-accent accent-green"></div>
         <div class="stat-body">
-          <div class="stat-label">NETWORK</div>
+          <div class="stat-label">网络</div>
           <div class="stat-rows">
             <div class="stat-row"><span>↑</span><b>{{ formatSpeed(netSend) }}</b></div>
             <div class="stat-row"><span>↓</span><b>{{ formatSpeed(netRecv) }}</b></div>
@@ -317,7 +318,7 @@ function onThemeSelect(_a: ActionSheetAction, idx: number) {
       <div class="stat-card">
         <div class="stat-accent accent-amber"></div>
         <div class="stat-body">
-          <div class="stat-label">DISK I/O</div>
+          <div class="stat-label">磁盘读写</div>
           <div class="stat-rows">
             <div class="stat-row"><span>Read</span><b>{{ formatSpeed(diskRead) }}</b></div>
             <div class="stat-row"><span>Write</span><b>{{ formatSpeed(diskWrite) }}</b></div>
@@ -326,7 +327,7 @@ function onThemeSelect(_a: ActionSheetAction, idx: number) {
       </div>
     </div>
 
-    <div class="section-title" v-if="volumes.length"><span>STORAGE</span></div>
+    <div class="section-title" v-if="volumes.length"><span>存储空间</span></div>
     <div class="volumes">
       <div v-for="v in volumes" :key="v.id ?? v.volume_path ?? v._name" class="vol-card">
         <div class="vol-head">
@@ -340,7 +341,7 @@ function onThemeSelect(_a: ActionSheetAction, idx: number) {
       </div>
     </div>
 
-    <div class="section-title" v-if="disks.length"><span>DISK HEALTH</span></div>
+    <div class="section-title" v-if="disks.length"><span>磁盘健康</span></div>
     <div class="disks" v-if="disks.length">
       <div v-for="d in disks" :key="d.id ?? d._name" class="disk-card">
         <div class="disk-head">
@@ -357,14 +358,14 @@ function onThemeSelect(_a: ActionSheetAction, idx: number) {
       </div>
     </div>
 
-    <div class="section-title"><span>ACCOUNT</span></div>
+    <div class="section-title"><span>账号信息</span></div>
     <div class="info-card">
       <div class="info-row"><span>共享文件夹</span><b>{{ sharesCount }}</b></div>
       <div class="info-row"><span>SynoToken</span><b>{{ dsm.synoToken ? '已注入' : '未下发' }}</b></div>
     </div>
 
     <div class="section-title">
-      <span>LOCAL CACHE</span>
+      <span>本地缓存</span>
       <span class="right">上限 {{ formatBytes(CACHE_LIMIT_BYTES) }}</span>
     </div>
     <div class="vol-card">

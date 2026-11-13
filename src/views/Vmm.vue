@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WorkspaceHeader from '../components/WorkspaceHeader.vue'
 import { onMounted, ref, computed, reactive } from 'vue'
 import type { ActionSheetAction } from 'vant'
 import { useVmm, getVmmStatusLabel, type VmmGuest } from '../composables/useVmm'
@@ -115,15 +116,7 @@ async function onPullRefresh() {
 
     <template v-else>
       <!-- 顶部栏（桌面） -->
-      <div v-if="!isMobile" class="vmm-header">
-        <div class="vmm-header-left">
-          <h3 class="vmm-title">虚拟机</h3>
-          <el-icon v-if="loading" class="is-loading" :size="14"><Loading /></el-icon>
-        </div>
-        <el-button size="small" @click="refresh">
-          <el-icon><Refresh /></el-icon>刷新
-        </el-button>
-      </div>
+      <WorkspaceHeader v-if="!isMobile" title="虚拟机" description="查看运行状态、调整配置与管理电源。"><el-button :loading="loading" @click="refresh"><el-icon><Refresh /></el-icon>刷新</el-button></WorkspaceHeader>
 
       <!-- 主机信息 -->
       <div v-if="hosts.length" class="vmm-section">

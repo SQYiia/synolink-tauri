@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WorkspaceHeader from '../components/WorkspaceHeader.vue'
 import { onMounted, ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { ActionSheetAction } from 'vant'
@@ -242,7 +243,9 @@ async function onPullRefresh() {
 
     <template v-else>
       <!-- 顶部栏 -->
-      <div class="ds-header">
+      <WorkspaceHeader v-if="!isMobile" title="下载站" description="管理由 NAS 执行的下载任务。"><DownloadSettings/><el-button @click="btSearchOpen=true"><el-icon><Search /></el-icon>BT搜索</el-button><el-button type="primary" @click="createOpen=true"><el-icon><Plus /></el-icon>新建任务</el-button></WorkspaceHeader>
+      <div v-if="!isMobile" class="download-overview"><span><strong>{{tasks.length}}</strong> 个任务</span><span>下载 <strong>{{formatSpeed(statistic.speedDownload||0)}}</strong></span><span>上传 <strong>{{formatSpeed(statistic.speedUpload||0)}}</strong></span></div>
+      <div v-if="isMobile" class="ds-header">
         <div class="ds-header-left">
           <h3 class="ds-title">下载站</h3>
           <div class="ds-speed" v-if="statistic.speedDownload || statistic.speedUpload">

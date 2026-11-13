@@ -7,6 +7,8 @@ import { parseMemory } from '../utils/memory'
 import { formatBytes, formatSpeed } from '../utils/format'
 import { useIsMobile } from '../composables/useIsMobile'
 import FolderIcon from '../components/FolderIcon.vue'
+import WorkspaceHeader from '../components/WorkspaceHeader.vue'
+const appDescriptions:Record<string,string>={files:'浏览、整理与分享',album:'照片与美好时刻',videos:'影视库与视频播放',downloads:'NAS 下载任务',monitor:'资源与存储状态',vmm:'管理虚拟机',applications:'安装与更新套件',containers:'容器运行与日志',drive:'个人与团队文件',backups:'备份任务与结果',me:'账号与应用偏好',diagnostics:'连接与权限检查'}
 
 const router = useRouter()
 const app = useAppStore()
@@ -183,7 +185,7 @@ onUnmounted(() => {
   </van-pull-refresh>
 
   <div v-else class="dash-page ui-dashboard">
-    <header class="workspace-heading"><span>你的 NAS 工作空间</span><h1>概览</h1><p>管理文件、浏览媒体，随时了解设备运行状态。</p></header>
+    <WorkspaceHeader title="概览" description="设备状态与常用功能，一目了然。"><el-button @click="refreshUtil"><el-icon><Refresh /></el-icon>刷新状态</el-button></WorkspaceHeader>
     <!-- 顶部个人栏 -->
     <div class="dash-profile">
       <div class="dash-profile-left">
@@ -195,9 +197,7 @@ onUnmounted(() => {
           <div class="dash-host">{{ dsm.baseUrl || '—' }}</div>
         </div>
       </div>
-      <el-button size="small" text @click="refreshUtil">
-        <el-icon><Refresh /></el-icon>
-      </el-button>
+      <el-button @click="router.push('/app/monitor')">查看性能<el-icon><ArrowRight /></el-icon></el-button>
     </div>
 
     <!-- 状态卡片 2x2 -->
@@ -248,13 +248,13 @@ onUnmounted(() => {
 
     <!-- 功能宫格 -->
     <div class="dash-section-title">
-      功能
+      常用功能
       <el-button size="small" link @click="editing = !editing">
         {{ editing ? '完成' : '编辑' }}
       </el-button>
     </div>
     <div class="dash-grid">
-      <div
+      <button
         v-for="item in (editing ? ALL_APPS : visibleApps)"
         :key="item.id"
         class="dash-app-item"
@@ -264,11 +264,11 @@ onUnmounted(() => {
         <div class="dash-app-icon" :style="{ background: item.color + '15', color: item.color }">
           <el-icon :size="24"><component :is="item.icon" /></el-icon>
         </div>
-        <span class="dash-app-label">{{ item.label }}</span>
+        <span class="dash-app-text"><span class="dash-app-label">{{ item.label }}</span><small>{{appDescriptions[item.to.split('/').pop() || ''] || '打开功能页面'}}</small></span>
         <el-icon v-if="editing" class="dash-app-check" :color="hiddenIds.has(item.id) ? undefined : item.color">
           <component :is="hiddenIds.has(item.id) ? 'CircleClose' : 'CircleCheck'" />
         </el-icon>
-      </div>
+      </button>
     </div>
   </div>
 </template>

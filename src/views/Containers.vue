@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WorkspaceHeader from '../components/WorkspaceHeader.vue'
 import { computed, onActivated, onDeactivated, onUnmounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { dsm } from '../api/dsm'
@@ -68,7 +69,7 @@ onDeactivated(stop); onUnmounted(stop)
 </script>
 <template>
   <section class="container-page">
-    <header><div><span class="eyebrow">CONTAINER MANAGER</span><h1>容器</h1><p>{{ items.length }} 个容器 · {{ running }} 个运行中<span v-if="updated"> · 更新于 {{ updated }}</span></p></div><el-button :loading="loading" @click="refresh">刷新</el-button></header>
+    <WorkspaceHeader title="容器" :description="items.length+' 个容器，'+running+' 个运行中'+(updated?'，更新于 '+updated:'')"><el-button :loading="loading" @click="refresh">刷新</el-button></WorkspaceHeader>
     <el-alert v-if="error" :title="error + '，当前列表可能已过期'" type="warning" :closable="false" show-icon />
     <div class="container-toolbar"><el-input v-model="query" placeholder="搜索容器或镜像" clearable aria-label="搜索容器" /><span>{{ resourceError }}</span></div>
     <div class="container-grid">
