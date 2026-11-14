@@ -36,12 +36,12 @@
 /* File workspace: compact command area and one continuous document surface. */
 @media(min-width:641px){
  body .ui-files.page{background:hsl(var(--background));padding:0 24px;box-sizing:border-box;}
- body .ui-files>.el-header{padding:24px 0 0;}
- body .ui-files .file-heading{margin-bottom:20px;gap:16px;}
+ body .ui-files>.el-header{padding:20px 0 0;background:transparent;border:0;}
+ body .ui-files .file-heading{margin-bottom:12px;gap:16px;}
  body .ui-files .file-heading .page-title{font-size:23px;letter-spacing:-.4px;}
  body .ui-files .file-heading p{margin-top:5px;font-size:12px;}
- body .ui-files .file-location-bar{padding:10px 12px;background:hsl(var(--card));border:1px solid hsl(var(--border));border-radius:10px;}
- body .ui-files .el-main{padding:14px 0 20px;}
+ body .ui-files .file-location-bar{padding:10px 0;background:transparent;border:0;border-top:1px solid hsl(var(--border));border-radius:0;}
+ body .ui-files .el-main{padding:4px 0 20px;}
  body .ui-files .el-table{border:1px solid hsl(var(--border));border-radius:10px;background:hsl(var(--card));--el-table-row-hover-bg-color:hsl(var(--brand)/.06);}
  body .ui-files .el-table th.el-table__cell{height:38px;background:hsl(var(--muted)/.65);font-weight:500;}
  body .ui-files .el-table td.el-table__cell{height:48px;padding:6px 0;box-sizing:border-box;}
