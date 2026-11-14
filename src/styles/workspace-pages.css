@@ -48,3 +48,58 @@
  @media(max-width:1180px){body .ui-dashboard .dash-grid{grid-template-columns:repeat(2,minmax(0,1fr));}body .ui-dashboard .dash-stats{grid-template-columns:repeat(2,minmax(0,1fr));}.ui-dashboard .dash-stat-card:nth-child(-n+2){border-bottom:1px solid hsl(var(--border));}.package-overview>div{flex-direction:column;gap:3px;padding:0 18px;}.apps-toolbar>span{margin-left:0;}}
  @media(max-width:850px){body .apps-page,body .container-page,body .backup-page,body .drive-page,body .diagnostics{padding:24px;}body .ui-dashboard .dash-grid{grid-template-columns:1fr;}.download-overview{gap:14px;flex-wrap:wrap;}.package-overview>div{padding:0 12px;}.workspace-page-actions{flex-shrink:1;}}
 }
+
+/* Shared desktop surface contract. Viewer overlays retain their own canvas. */
+@media(min-width:641px){
+ body .app-shell .content{background:hsl(var(--background));}
+ body .ui-dashboard.dash-page,body .mon-page.mon-page,body .vmm-page.vmm-page,body .ui-settings.page,
+ body .apps-page,body .container-page,body .backup-page,body .drive-page,body .diagnostics,body .ds-page.ds-page,body .video-library,body .ui-album.page{
+  background:hsl(var(--background));padding:20px 24px;box-sizing:border-box;max-width:none;width:100%;margin:0;
+ }
+ body .workspace-page-header{background:transparent;margin-bottom:18px;padding:0;border:0;gap:16px;}
+ body .workspace-page-header h1{font-size:23px;letter-spacing:-.4px;}
+ body .workspace-page-header p{margin:5px 0 0;font-size:12px;line-height:1.6;}
+ body .ui-dashboard .dash-profile{padding:0 0 16px;background:transparent;}
+ body .ui-dashboard .dash-stats{margin:16px 0 22px;background:hsl(var(--card));border-radius:10px;}
+ body .ui-dashboard .dash-stat-card{padding:16px;gap:6px;}
+ body .ui-dashboard .dash-app-item{padding:14px;}
+ body .ui-dashboard .dash-section-title{margin:20px 0 12px;}
+ body .package-overview{margin:0 0 16px;padding:14px 0;background:hsl(var(--card));border-radius:10px;}
+ body .apps-page .package-center-actions{padding-bottom:16px;}
+ body .apps-page .installed-title{margin-top:20px;}
+ body .apps-page .apps-toolbar,body .container-page .container-toolbar,body .backup-page .backup-toolbar,body .drive-page .drive-toolbar{margin:12px 0 16px;padding:0 0 12px;gap:10px;}
+ body .apps-page .package-card,body .backup-page .backup-card,body .container-page .container-card,body .vmm-page .vmm-card{padding:16px;background:hsl(var(--card));border:1px solid hsl(var(--border));}
+ body .container-page .resource-row{padding:12px 0;margin-bottom:12px;}
+ body .apps-page .package-description{min-height:0;}
+ body .mon-page .stat-card,body .ui-settings .stat-card,body .mon-page .vol-card,body .mon-page .disk-card,body .ui-settings .vol-card,body .ui-settings .disk-card,body .ui-settings .info-card,body .vmm-page .vmm-host-card,body .vmm-page .vmm-storage-card{background:hsl(var(--card));border:1px solid hsl(var(--border));box-shadow:none;border-radius:10px;}
+ body .mon-page .section-title,body .ui-settings .section-title{margin-top:20px!important;}
+ body .ui-settings .profile{padding:16px 18px;border-radius:10px;}
+ body .download-overview{padding:14px 16px;margin-bottom:14px;background:hsl(var(--card));gap:24px;}
+ body .ds-page .ds-header{margin-bottom:18px;}
+ body .ds-page .el-table td.el-table__cell,body .drive-page .el-table td.el-table__cell{padding:8px 0;}
+ body .drive-page .el-table{border:1px solid hsl(var(--border));border-radius:10px;}
+ body .drive-page .drive-name{padding:4px 0;}
+ body .workload-manager,body .vmm-tasks{margin-top:20px;padding-top:16px;}
+ body .workload-manager header,body .vmm-tasks header{background:transparent;}
+ body .workload-manager article,body .vmm-tasks article{padding:14px 0;}
+ body .diagnostics{max-width:none;}
+ body .diagnostics>header{background:transparent;margin-bottom:18px;}
+ body .diagnostics h1{font-size:23px;margin:0;}
+ body .diagnostics article{background:hsl(var(--card));border-radius:10px;padding:16px;margin:10px 0;}
+ body .video-library .library-header{background:transparent;margin-bottom:16px;}
+ body .video-library .library-header h1{font-size:23px;margin:0;}
+ body .video-library .eyebrow{display:none;}
+ body .video-library .library-path{padding-bottom:12px;margin-bottom:16px;}
+ body .video-library .video-grid{gap:20px 16px;}
+ body .ui-album.page>.topbar{background:transparent;padding:0 0 14px;margin-bottom:12px;}
+ body .ui-album .title{font-size:23px;margin:0;}
+ body .ui-album .folder-bar{background:transparent;padding:0 0 12px;border-radius:0;}
+ body .el-button--success:not(.is-text):not(.is-link),body .el-button--warning:not(.is-text):not(.is-link){background:hsl(var(--card))!important;border-color:hsl(var(--border))!important;color:hsl(var(--foreground))!important;}
+ body .workspace-page-actions .el-button,body .manager-actions .el-button,body .vmm-card-actions .el-button{margin:0;}
+ body .el-button:not(.is-circle)>.el-icon{flex-shrink:0;}
+ body .ui-servers.page{padding:28px 24px;}
+ body .ui-servers .hero{padding-bottom:18px;margin-bottom:18px;}
+ body .ui-servers .server-card{padding:18px;border-radius:10px;box-shadow:none;}
+ @media(min-width:1600px){body .ui-dashboard.dash-page,body .mon-page.mon-page,body .vmm-page.vmm-page,body .ui-settings.page,body .apps-page,body .container-page,body .backup-page,body .drive-page,body .diagnostics,body .ds-page.ds-page,body .video-library,body .ui-album.page{padding-left:40px;padding-right:40px;}}
+ @media(max-width:850px){body .ui-dashboard.dash-page,body .mon-page.mon-page,body .vmm-page.vmm-page,body .ui-settings.page,body .apps-page,body .container-page,body .backup-page,body .drive-page,body .diagnostics,body .ds-page.ds-page,body .video-library,body .ui-album.page{padding:20px 16px;}body .apps-page .apps-grid,body .container-page .container-grid{grid-template-columns:1fr;}}
+}

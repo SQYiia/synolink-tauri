@@ -432,7 +432,7 @@ useBackHandler(() => {
 
 <template>
   <!-- 桌面端 -->
-  <div v-if="!isMobile" class="page">
+  <div v-if="!isMobile" class="page ui-album">
     <header class="topbar">
       <h2 class="title">相册</h2>
       <div class="actions">
