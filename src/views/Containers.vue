@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WorkloadManager from '../components/WorkloadManager.vue'
 import {snapshotFileClient} from '../composables/useFileOperations'
 import {containerDetails} from '../utils/workloadDetails'
 import {invoke} from '@tauri-apps/api/core'
@@ -93,6 +94,7 @@ onDeactivated(stop); onUnmounted(stop)
         <footer><el-button @click="showDetail(c.name)">详情</el-button><el-button @click="showLogs(c.name)">日志</el-button><div><el-button v-if="['stopped','exited','created'].includes(c.status)" :disabled="!!pending || !!error" @click="operate(c.name, 'start')">启动</el-button><template v-if="c.status === 'running'"><el-button :disabled="!!pending || !!error" @click="operate(c.name, 'restart')">重启</el-button><el-button :disabled="!!pending || !!error" @click="operate(c.name, 'stop')">停止</el-button></template><span v-if="pending === c.name">处理中…</span></div></footer>
       </article>
     </div>
+    <WorkloadManager kind="images"/><WorkloadManager kind="projects"/>
     <el-empty v-if="!visible.length && !loading" :description="error ? '暂时无法读取容器' : query ? '没有匹配容器' : '暂无容器'" />
     <el-dialog v-model="detailOpen" :title="detailName+' · 容器详情'" width="min(760px,94vw)" @closed="detailEpoch++"><p v-if="detailBusy">正在读取…</p><el-alert v-if="detailError" :title="detailError" type="warning" :closable="false"/><template v-if="detail"><el-descriptions :column="1" border><el-descriptions-item label="重启策略">{{detail.restart}}</el-descriptions-item><el-descriptions-item label="健康状态">{{detail.health}}</el-descriptions-item><el-descriptions-item label="退出码">{{detail.exit}}</el-descriptions-item></el-descriptions><section v-for="group in ([{title:'端口映射',rows:detail.ports},{title:'挂载目录',rows:detail.mounts},{title:'网络',rows:detail.networks}])" :key="group.title"><h3>{{group.title}}</h3><p v-for="(row,i) in group.rows" :key="i" style="overflow-wrap:anywhere">{{row}}</p><p v-if="!group.rows.length">NAS 未返回此信息</p></section></template><template #footer><el-button :loading="detailBusy" @click="showDetail(detailName)">重新读取</el-button></template></el-dialog>
     <el-dialog v-model="logOpen" :title="logName + ' · 日志'" width="min(900px, 94vw)" @closed="logGeneration++">

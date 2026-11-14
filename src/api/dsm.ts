@@ -1,4 +1,5 @@
 import { recordError } from '../utils/errorHistory'
+import {managementApis,managementRequest,type ManagementKind} from '../utils/workloadManagement'
 import { fetch } from '@tauri-apps/plugin-http'
 import { invoke } from '@tauri-apps/api/core'
 
@@ -1037,6 +1038,12 @@ export class DsmClient {
   }
   async containerList() {
     return this.entry('SYNO.Docker.Container', 'list', { params: { type: 'all', offset: 0, limit: -1 } })
+  }
+  async manageWorkload(kind:ManagementKind,action:string,args:Record<string,any>={}){
+    const api=managementApis[kind]
+    if(!this.apiInfo[api])throw Error('当前 NAS 未提供此管理接口，请检查套件版本和账号权限')
+    const request=managementRequest(kind,action,args)
+    return this.entry(api,request.method,{post:!['list','get'].includes(action),params:request.params})
   }
   async containerResources() { return this.entry('SYNO.Docker.Container.Resource', 'get') }
   async containerDetail(name:string) {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WorkloadManager from '../components/WorkloadManager.vue'
 import VmmTasks from '../components/VmmTasks.vue'
 import WorkspaceHeader from '../components/WorkspaceHeader.vue'
 import { onMounted, ref, computed, reactive } from 'vue'
@@ -254,6 +255,7 @@ async function onPullRefresh() {
           </div>
           <p class="vmm-detail-note">CPU 和内存需在关机后修改，实际可分配资源由 NAS 校验。</p>
         </el-form>
+        <WorkloadManager v-if="detailOpen" kind="snapshots" :guest-id="selectedGuest.guestId" :guest-status="selectedGuest.status"/>
         <div class="vmm-hardware"><h4>磁盘与网络</h4>
           <p v-for="(disk, i) in selectedGuest.disks" :key="disk.vdisk_id">磁盘 {{ i + 1 }} · {{ (disk.vdisk_size / 1024).toFixed(1) }} GB</p>
           <p v-for="nic in selectedGuest.nics" :key="nic.vnic_id">{{ nic.network_name || '未连接网络' }} · {{ nic.mac }}</p>
