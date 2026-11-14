@@ -78,6 +78,14 @@ try {
  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),true)
  await page.screenshot({path:resolve(out,'package-center.png')})
  await center.getByLabel('Close this dialog').click()
+ for(const dark of [false,true]){
+  await page.evaluate(dark=>document.documentElement.classList.toggle('dark',dark),dark)
+  for(const route of ['dashboard','applications','monitor','downloads','backups','drive','containers','vmm','me','diagnostics']){
+   await page.evaluate(route=>window.workspace.navigate('/app/'+route),route);await page.waitForTimeout(350)
+   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),route+' phone overflow')
+   await page.screenshot({path:resolve(out,`${route}-${dark?'dark':'light'}.png`)})
+  }
+ }
  await page.setViewportSize({ width: 915, height: 412 })
  await page.waitForTimeout(300)
  assert.ok(await page.locator('.van-tabbar').isVisible(), 'Touch navigation remains visible in landscape')
