@@ -13,7 +13,7 @@ import 'element-plus/dist/index.css'
 import 'element-plus/theme-chalk/dark/css-vars.css'
 import { Close, Download, Delete, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import PhotoViewer from '../src/components/PhotoViewer.vue'
-import { dsm } from '../src/api/dsm'
+import { dsm, DsmClient } from '../src/api/dsm'
 import '../src/styles/base.css'
 import '../src/styles/polish.css'
 import '../src/styles/desktop.css'
@@ -87,6 +87,10 @@ export async function showWorkspace(initialPhotoCount = 1) {
   dsm.containerResources = async () => ({success:true,data:{resources:[{name:'redis-demo',cpu:0.8,memory:12000000}]}})
   dsm.containerAction = async (name,action) => { const item=containers.find(c=>c.name===name);if(!item)throw Error('wrong container');item.status=action==='stop'?'stopped':'running';return {success:true} }
   dsm.containerLogs = async () => ({success:true,data:{logs:[{created:'2026-11-01',stream:'stdout',text:'Server ready <script>not executed</script>'}],total:1}})
+  DsmClient.prototype.containerLogs=dsm.containerLogs
+  DsmClient.prototype.containerDetail=async()=>({success:true,data:{container:{restart_policy:'always',port_bindings:[{host_port:8080,container_port:80,type:'tcp'}],volume_bindings:[{host_volume_file:'/docker/web',mount_point:'/data',read_only:true}],networks:[{name:'bridge'}],exit_code:0}}})
+  DsmClient.prototype.vmmTaskList=async()=>({success:true,data:{task_ids:['fixture-task']}})
+  DsmClient.prototype.vmmTaskGet=async()=>({success:true,data:{finish:false,task_info:{progress:50,status:'create'}}})
   let settings = {bt_max_download:50,bt_max_upload:0,http_max_download:0,ftp_max_download:0,default_destination:'Downloads'}
   dsm.dsConfig = async () => ({success:true,data:settings})
   dsm.dsSetConfig = async values => {Object.assign(settings,values);return {success:true}}

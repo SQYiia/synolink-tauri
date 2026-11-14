@@ -1039,6 +1039,15 @@ export class DsmClient {
     return this.entry('SYNO.Docker.Container', 'list', { params: { type: 'all', offset: 0, limit: -1 } })
   }
   async containerResources() { return this.entry('SYNO.Docker.Container.Resource', 'get') }
+  async containerDetail(name:string) {
+    if(!this.apiInfo['SYNO.Docker.Container'])throw new Error('当前 NAS 未提供容器详情接口')
+    return this.entry('SYNO.Docker.Container','get',{params:{name}})
+  }
+  async vmmTaskList(){
+    if(!this.apiInfo['SYNO.Virtualization.API.Task.Info'])throw new Error('当前 VMM 未提供任务查询接口')
+    return this.entry('SYNO.Virtualization.API.Task.Info','list')
+  }
+  async vmmTaskGet(taskId:string){return this.entry('SYNO.Virtualization.API.Task.Info','get',{params:{task_id:taskId}})}
   async containerAction(name: string, action: 'start' | 'stop' | 'restart') {
     if (!['start', 'stop', 'restart'].includes(action) || !name) throw new Error('无效的容器操作')
     return this.entry('SYNO.Docker.Container', action, { post: true, params: { name } })

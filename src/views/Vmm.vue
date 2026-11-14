@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import VmmTasks from '../components/VmmTasks.vue'
 import WorkspaceHeader from '../components/WorkspaceHeader.vue'
 import { onMounted, ref, computed, reactive } from 'vue'
 import type { ActionSheetAction } from 'vant'
@@ -63,6 +64,8 @@ function isTransitioning(status: string) {
   return ['booting', 'shutting_down', 'moving', 'stor_migrating', 'creating', 'importing', 'preparing'].includes(status)
 }
 
+function resourceText(value:number, divisor=1){return Number.isFinite(value)&&value>=0?String(Math.round(value/divisor*10)/10):'—'}
+
 function autorunLabel(v: number) {
   if (v === 2) return '自动开机'
   if (v === 1) return '上次状态'
@@ -70,7 +73,7 @@ function autorunLabel(v: number) {
 }
 
 function storagePct(s: { size: number; used: number }) {
-  return s.size ? Math.round((s.used / s.size) * 100) : 0
+  return Number.isFinite(s.size) && Number.isFinite(s.used) && s.size > 0 ? Math.min(100, Math.round((s.used / s.size) * 100)) : 0
 }
 
 async function handlePowerOn(guest: VmmGuest) {
@@ -132,11 +135,11 @@ async function onPullRefresh() {
             <div class="vmm-host-stats">
               <div class="vmm-host-stat">
                 <span class="vmm-host-stat-label">CPU</span>
-                <span class="vmm-host-stat-val">{{ h.totalCpu - h.freeCpu }} / {{ h.totalCpu }} 核</span>
+                <span class="vmm-host-stat-val">{{ resourceText(h.totalCpu - h.freeCpu) }} / {{ resourceText(h.totalCpu) }} 核</span>
               </div>
               <div class="vmm-host-stat">
                 <span class="vmm-host-stat-label">内存</span>
-                <span class="vmm-host-stat-val">{{ Math.round((h.totalRam - h.freeRam) / 1024 * 10) / 10 }} / {{ Math.round(h.totalRam / 1024 * 10) / 10 }} GB</span>
+                <span class="vmm-host-stat-val">{{ resourceText(h.totalRam - h.freeRam,1024) }} / {{ resourceText(h.totalRam,1024) }} GB</span>
               </div>
             </div>
           </div>
@@ -230,13 +233,14 @@ async function onPullRefresh() {
               <div class="vmm-storage-fill" :style="{ width: storagePct(s) + '%' }"></div>
             </div>
             <div class="vmm-storage-detail">
-              {{ s.used ? (s.used / 1024).toFixed(1) : 0 }} / {{ (s.size / 1024).toFixed(1) }} GB · {{ s.volumePath }}
+              {{ resourceText(s.used,1024) }} / {{ resourceText(s.size,1024) }} GB · {{ s.volumePath }}
             </div>
           </div>
         </div>
       </div>
     </template>
 
+    <VmmTasks/>
     <el-dialog v-model="detailOpen" title="虚拟机详情与配置" :width="isMobile ? '94%' : '640px'" :close-on-click-modal="false">
       <template v-if="selectedGuest">
         <div class="vmm-detail-summary"><el-tag>{{ getVmmStatusLabel(selectedGuest.status).label }}</el-tag><span>{{ selectedGuest.storageName }}</span></div>

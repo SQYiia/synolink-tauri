@@ -93,7 +93,7 @@ pub async fn deliver_download(
     }
 }
 #[tauri::command]
-pub async fn export_android_report(app: tauri::AppHandle, report: String) -> Result<bool, String> {
+pub async fn export_android_report(app: tauri::AppHandle, report: String, kind: Option<String>) -> Result<bool, String> {
     if report.len() > 262144 || serde_json::from_str::<serde_json::Value>(&report).is_err() {
         return Err("无效报告".into());
     }
@@ -103,7 +103,7 @@ pub async fn export_android_report(app: tauri::AppHandle, report: String) -> Res
             .path()
             .app_data_dir()
             .map_err(|_| "应用目录不可用")?
-            .join("SynoLink-diagnostics.json");
+            .join(if kind.as_deref() == Some("container-log") { "SynoLink-container-log.json" } else { "SynoLink-diagnostics.json" });
         std::fs::write(&path, report).map_err(|_| "报告写入失败")?;
         let result: serde_json::Value = app
             .state::<Bridge>()

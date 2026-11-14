@@ -71,15 +71,17 @@ function mapGuest(raw: any): VmmGuest {
   }
 }
 
+function resourceNumber(value:any):number { return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)) && Number(value)>=0 ? Number(value) : NaN }
+
 function mapHost(raw: any): VmmHost {
   return {
     hostId: raw.host_id ?? '',
     hostName: raw.host_name ?? '',
     status: raw.status ?? 'unknown',
-    totalCpu: raw.total_cpu_core ?? 0,
-    freeCpu: raw.free_cpu_core ?? 0,
-    totalRam: raw.total_ram_size ?? 0,
-    freeRam: raw.free_ram_size ?? 0,
+    totalCpu: resourceNumber(raw.total_cpu_core),
+    freeCpu: resourceNumber(raw.free_cpu_core),
+    totalRam: resourceNumber(raw.total_ram_size),
+    freeRam: resourceNumber(raw.free_ram_size),
   }
 }
 
@@ -89,8 +91,8 @@ function mapStorage(raw: any): VmmStorage {
     storageName: raw.storage_name ?? '',
     hostName: raw.host_name ?? '',
     status: raw.status ?? 'unknown',
-    size: raw.size ?? 0,
-    used: raw.used ?? 0,
+    size: resourceNumber(raw.size),
+    used: resourceNumber(raw.used),
     volumePath: raw.volume_path ?? '',
   }
 }
@@ -110,11 +112,14 @@ export const vmmStorages = computed(() => state.storages)
 export const vmmLoading = computed(() => state.loading)
 export const vmmAvailable = computed(() => state.available)
 
+let epoch = 0
 let stateContext = ''
 function resetContext() {
   const context = JSON.stringify([dsm.baseUrl, dsm.account])
   if (context !== stateContext) {
+    epoch++
     stateContext = context
+    state.reason = ''
     state.guests = []
     state.hosts = []
     state.storages = []
@@ -126,18 +131,19 @@ let pollTimer: ReturnType<typeof setInterval> | null = null
 
 export async function vmmRefresh() {
   resetContext()
-  const context = stateContext
   if (state.loading || document.hidden) return
+  const context = stateContext, token = ++epoch, sid = dsm.sid
   state.loading = true
   try {
-    const [guestRes, hostRes, storageRes] = await Promise.all([
+    const results = await Promise.allSettled([
       dsm.vmmGuestList(),
       dsm.vmmHostList(),
       dsm.vmmStorageList(),
     ])
-    if (context !== JSON.stringify([dsm.baseUrl, dsm.account])) return
+    if (token !== epoch || sid !== dsm.sid || context !== JSON.stringify([dsm.baseUrl, dsm.account])) return
+    const [guestRes, hostRes, storageRes] = results.map(r => r.status === 'fulfilled' ? r.value : {success:false})
     state.reason = ''
-    if (guestRes.success && guestRes.data) {
+    if (guestRes.success && Array.isArray(guestRes.data?.guests)) {
       state.guests = ((guestRes.data as any).guests ?? []).map(mapGuest)
       state.available = true
     } else {
@@ -148,16 +154,18 @@ export async function vmmRefresh() {
         return
       }
     }
-    if (hostRes.success && hostRes.data) {
+    if (!hostRes.success || !Array.isArray(hostRes.data?.hosts)) { state.hosts = []; state.reason += ' 主机信息暂不可用。' }
+    if (hostRes.success && Array.isArray(hostRes.data?.hosts)) {
       state.hosts = ((hostRes.data as any).hosts ?? []).map(mapHost)
     }
-    if (storageRes.success && storageRes.data) {
+    if (!storageRes.success || !Array.isArray(storageRes.data?.storages)) { state.storages = []; state.reason += ' 存储信息暂不可用。' }
+    if (storageRes.success && Array.isArray(storageRes.data?.storages)) {
       state.storages = ((storageRes.data as any).storages ?? []).map(mapStorage)
     }
   } catch {
     if (context === JSON.stringify([dsm.baseUrl, dsm.account])) state.reason = '无法刷新虚拟机状态，请检查 NAS 连接；当前数据可能已过期'
   } finally {
-    if (context === stateContext) state.loading = false
+    if (token === epoch) state.loading = false
   }
 }
 
@@ -168,6 +176,7 @@ export function vmmStartPolling(intervalMs = 5000) {
 }
 
 export function vmmStopPolling() {
+  epoch++; state.loading = false
   if (pollTimer) {
     clearInterval(pollTimer)
     pollTimer = null
@@ -181,14 +190,16 @@ export function vmmError(code?: number) {
 const busy = reactive<Record<string, boolean>>({})
 async function action(guestId: string, label: string, request: () => Promise<any>) {
   if (busy[guestId]) return false
+  const context = JSON.stringify([dsm.baseUrl,dsm.account,dsm.sid])
   busy[guestId] = true
   try {
     const res = await request()
+    if(context !== JSON.stringify([dsm.baseUrl,dsm.account,dsm.sid]))return false
     if (!res.success) throw new Error(vmmError(res.error?.code))
     ElMessage.success(label + '指令已发送')
     await vmmRefresh()
     return true
-  } catch (error: any) { ElMessage.error(error?.message || label + '失败'); return false }
+  } catch (error: any) { if(context === JSON.stringify([dsm.baseUrl,dsm.account,dsm.sid]))ElMessage.error(error?.message || label + '失败'); return false }
   finally { delete busy[guestId] }
 }
 export const vmmPowerOn = (id: string) => action(id, '开机', () => dsm.vmmGuestPowerOn(id))
