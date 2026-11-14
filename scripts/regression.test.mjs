@@ -400,6 +400,7 @@ test('package, container and download settings requests preserve identifiers and
 test('Drive uses its own session while backup uses the primary session',async()=>{
  const calls=[];const {DsmClient}=loadClient(async(url)=>{calls.push(new URL(url));return new Response(JSON.stringify({success:true,data:{}}))});const client=new DsmClient('https://nas');client.sid='main';client.driveSid='drive';
  await client.driveFiles('id:987654321012345678',100);assert.equal(calls[0].searchParams.get('_sid'),'drive');assert.equal(calls[0].searchParams.get('path'),'id:987654321012345678');assert.equal(calls[0].searchParams.get('offset'),'100');assert.equal(calls[0].searchParams.get('version'),'2');
+ client.apiInfo={'SYNO.Backup.Task':{path:'entry.cgi',minVersion:1,maxVersion:1},'SYNO.ActiveBackup.Task':{path:'entry.cgi',minVersion:1,maxVersion:1}};
  await client.hyperBackupTasks();assert.equal(calls[1].searchParams.get('_sid'),'main');assert.equal(calls[1].searchParams.get('method'),'list');
  await client.activeBackupTasks();assert.equal(calls[2].searchParams.get('load_devices'),'false');
 })

@@ -977,14 +977,20 @@ export class DsmClient {
   async driveTeamFolders(offset = 0) {
     return this.entry('SYNO.SynologyDrive.TeamFolders', 'list', { params: { offset, limit: 100, filter: '{}', sort_by: 'name', sort_direction: 'asc' } })
   }
+  private backupVersion(api: string) {
+    const info = this.apiInfo[api]
+    if (!info) throw new Error('当前 NAS 未提供备份任务接口，请检查套件是否已安装并启用')
+    if (!Number.isInteger(info.minVersion) || !Number.isInteger(info.maxVersion) || info.minVersion < 1 || info.maxVersion < info.minVersion) throw new Error('备份接口版本信息无效，请重新连接 NAS')
+    return info.minVersion
+  }
   async hyperBackupTasks() {
-    return this.entry('SYNO.Backup.Task', 'list', { params: { version: 1, additional: JSON.stringify(['last_bkp_time', 'last_bkp_result']) } })
+    return this.entry('SYNO.Backup.Task', 'list', { params: { version: this.backupVersion('SYNO.Backup.Task'), additional: JSON.stringify(['last_bkp_time', 'last_bkp_result']) } })
   }
   async hyperBackupStatus(taskId: string) {
-    return this.entry('SYNO.Backup.Task', 'status', { params: { version: 1, task_id: taskId, blOnline: false, additional: JSON.stringify(['last_bkp_time', 'next_bkp_time', 'last_bkp_result', 'last_bkp_progress']) } })
+    return this.entry('SYNO.Backup.Task', 'status', { params: { version: this.backupVersion('SYNO.Backup.Task'), task_id: taskId, blOnline: false, additional: JSON.stringify(['last_bkp_time', 'next_bkp_time', 'last_bkp_result', 'last_bkp_progress']) } })
   }
   async activeBackupTasks() {
-    return this.entry('SYNO.ActiveBackup.Task', 'list', { params: { version: 1, load_status: true, load_result: true, load_devices: false, load_versions: false, filter: '{}' } })
+    return this.entry('SYNO.ActiveBackup.Task', 'list', { params: { version: this.backupVersion('SYNO.ActiveBackup.Task'), load_status: true, load_result: true, load_devices: false, load_versions: false, filter: '{}' } })
   }
 
   async packageList() {

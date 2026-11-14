@@ -1,3 +1,4 @@
+mod computer_backup;
 mod photo_backup;
 mod native_downloads;
 mod delivery;
@@ -1001,8 +1002,9 @@ fn save_diagnostic_report(path: String, report: String) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(computer_backup::Backups::default())
         .manage(native_downloads::Queue::default())
-        .setup(|app|{native_downloads::setup(app.handle());Ok(())})
+        .setup(|app|{native_downloads::setup(app.handle());computer_backup::setup(app.handle());Ok(())})
         .manage(delivery::Completed::default())
         .plugin(delivery::init())
         .plugin(photo_backup::init())
@@ -1014,6 +1016,11 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .register_asynchronous_uri_scheme_protocol("dsm", dsm_protocol)
         .invoke_handler(tauri::generate_handler![
+            computer_backup::computer_backup_create,
+            computer_backup::computer_backup_snapshot,
+            computer_backup::computer_backup_start,
+            computer_backup::computer_backup_cancel,
+            computer_backup::computer_backup_remove,
             photo_backup::photo_backup_action,
             native_downloads::native_download_remove,
             native_downloads::native_download_add,
