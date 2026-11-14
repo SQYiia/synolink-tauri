@@ -34,7 +34,6 @@ router.beforeEach((_to, from) => {
       const clone = shell.cloneNode(true) as HTMLElement
       clone.classList.remove('m-swiping', 'm-swipe-transition')
       routeSnapshots.set(from.fullPath, clone)
-      // GC：超过上限淘汰最早的
       if (routeSnapshots.size > MAX_SNAPSHOTS) {
         const firstKey = routeSnapshots.keys().next().value
         if (firstKey) routeSnapshots.delete(firstKey)
@@ -256,7 +255,6 @@ export function useInteractiveSwipeBack(opts: UseSwipeOptions = {}) {
     }
   }
 
-  /** 取消：带过渡回弹到 0 */
   function cancelSwipe() {
     swipeActive.value = false
     isTransitioning.value = true

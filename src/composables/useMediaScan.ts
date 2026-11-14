@@ -212,7 +212,6 @@ export function useMediaScan(opts: UseMediaScanOptions) {
       if (gen !== scanGen) return
       if (!drained) throw new Error('扫描尚未完成，当前仅显示部分结果，请重试')
 
-      // 托底：在前端按 sortBy 字段排序一次，保证 25/26 年照片位于最前。
       if (sortBy === 'crtime' || sortBy === 'mtime' || sortBy === 'atime' || sortBy === 'ctime') {
         const key = sortBy
         const dir = sortDirection === 'asc' ? 1 : -1
@@ -228,11 +227,10 @@ export function useMediaScan(opts: UseMediaScanOptions) {
         const dir = sortDirection === 'asc' ? 1 : -1
         collected.sort((a, b) => (Number(a?.additional?.size ?? 0) - Number(b?.additional?.size ?? 0)) * dir)
       }
-      
+
       // A first empty task can race DSM indexing/session recovery. Confirm automatically
       // before replacing a cached library with an empty result. Keep retries bounded.
       if (automatic && collected.length === 0 && attempt < 2) { retry = true; return }
-      // 兑底：确保最后一批数据可见（排序后重新 flush）
       items.value = collected.slice()
 
       void writeMediaCache(cacheKey, collected)

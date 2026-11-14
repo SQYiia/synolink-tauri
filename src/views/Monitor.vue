@@ -44,11 +44,11 @@ function pctColor(p: number) {
 </script>
 
 <template>
-  <!-- 桌面端 -->
+
   <div v-if="!isMobile" class="mon-page" v-loading="m.loading.value">
     <WorkspaceHeader title="性能监控" description="关注资源占用、存储空间与磁盘健康。"><span class="monitor-updated">{{m.lastUpdate.value ? '更新于 '+m.lastUpdate.value : '等待数据'}}</span></WorkspaceHeader>
 
-    <!-- 状态卡片 -->
+
     <div class="grid">
       <div class="stat-card">
         <div class="stat-label">CPU</div>
@@ -119,10 +119,10 @@ function pctColor(p: number) {
     </div>
   </div>
 
-  <!-- 移动端 -->
+
   <div v-else class="m-mon">
     <van-pull-refresh v-model="refreshing" @refresh="onPullRefresh">
-      <!-- 状态 grid -->
+
       <div class="m-stat-grid">
         <div class="m-stat-card">
           <div class="m-stat-label">CPU</div>
@@ -154,7 +154,7 @@ function pctColor(p: number) {
         </div>
       </div>
 
-      <!-- 存储卷 -->
+
       <template v-if="m.volumes.value.length">
         <div class="m-group-title"><span>存储</span></div>
         <van-cell-group inset>
@@ -177,7 +177,7 @@ function pctColor(p: number) {
         </van-cell-group>
       </template>
 
-      <!-- 磁盘 -->
+
       <template v-if="m.disks.value.length">
         <div class="m-group-title"><span>磁盘</span></div>
         <van-cell-group inset>

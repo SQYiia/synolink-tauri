@@ -2,7 +2,6 @@
 defineProps<{
   size?: number | string
   color?: string
-  /** outline (默认) 或 filled */
   filled?: boolean
 }>()
 </script>

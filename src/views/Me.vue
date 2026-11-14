@@ -232,7 +232,6 @@ async function switchServer() {
   router.replace('/servers')
 }
 
-// 主题
 const { mode: themeMode, setMode } = useTheme()
 const themeLabel: Record<ThemeMode, string> = {
   auto: '跟随系统',
@@ -257,7 +256,7 @@ function onThemeSelect(_a: ActionSheetAction, idx: number) {
 </script>
 
 <template>
-  <!-- 桌面端 -->
+
   <div v-if="!isMobile" class="page ui-settings" v-loading="loading">
     <WorkspaceHeader title="设置" description="账号、设备信息与应用偏好。"><el-button @click="router.push('/app/diagnostics')">连接诊断</el-button></WorkspaceHeader>
     <div class="profile">
@@ -400,10 +399,10 @@ function onThemeSelect(_a: ActionSheetAction, idx: number) {
     </div>
   </div>
 
-  <!-- 移动端：纯设置页 -->
+
   <div v-else class="m-me">
     <van-cell title="连接诊断" is-link @click="router.push('/app/diagnostics')" />
-    <!-- 头像 / 账户区 -->
+
     <div class="m-profile-card">
       <div class="m-avatar">
         <van-icon name="manager" size="24" />
@@ -414,20 +413,20 @@ function onThemeSelect(_a: ActionSheetAction, idx: number) {
       </div>
     </div>
 
-    <!-- 外观 -->
+
     <div class="m-group-title"><span>外观</span></div>
     <van-cell-group inset>
       <van-cell title="主题" :value="themeLabel[themeMode]" is-link clickable @click="openThemeSheet" />
     </van-cell-group>
 
-    <!-- 账户信息 -->
+
     <div class="m-group-title"><span>账户</span></div>
     <van-cell-group inset>
       <van-cell title="共享文件夹" :value="String(sharesCount)" />
       <van-cell title="会话状态" :value="dsm.synoToken ? '已连接' : '未连接'" />
     </van-cell-group>
 
-    <!-- 缓存 -->
+
     <div class="m-group-title">
       <span>本地缓存</span>
       <span class="m-group-right">上限 {{ formatBytes(CACHE_LIMIT_BYTES) }}</span>
@@ -454,7 +453,7 @@ function onThemeSelect(_a: ActionSheetAction, idx: number) {
       <van-cell title="清除缓存" is-link clickable @click="clearCache" :value="cacheBusy ? '处理中...' : ''" />
     </van-cell-group>
 
-    <!-- 操作 -->
+
     <div class="m-group-title"><span>操作</span></div>
     <van-cell-group inset>
       <van-cell title="删除已保存密码" is-link @click="forgetPasswords" />

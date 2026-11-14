@@ -41,7 +41,6 @@ const dialogWidth = computed(() => isMobile.value ? '92%' : '500px')
 const dialogWidthLg = computed(() => isMobile.value ? '95%' : '640px')
 const selectedIds = computed(() => selected.value.map(t => t.id))
 
-// 移动端任务操作 sheet
 const sheetOpen = ref(false)
 const sheetActions = ref<ActionSheetAction[]>([])
 function openTaskActions(task: DSTask) {
@@ -232,7 +231,7 @@ async function onPullRefresh() {
 <template>
   <div class="ds-page">
     <van-pull-refresh v-model="refreshing" @refresh="onPullRefresh" :disabled="!isMobile">
-    <!-- 未安装提示 -->
+
     <div v-if="!available" class="ds-unavailable">
       <el-icon :size="40"><Connection /></el-icon>
       <h3>Download Station 不可用</h3>
@@ -242,7 +241,7 @@ async function onPullRefresh() {
     </div>
 
     <template v-else>
-      <!-- 顶部栏 -->
+
       <WorkspaceHeader v-if="!isMobile" title="下载站" description="管理由 NAS 执行的下载任务。"><DownloadSettings/><el-button @click="btSearchOpen=true"><el-icon><Search /></el-icon>BT搜索</el-button><el-button type="primary" @click="createOpen=true"><el-icon><Plus /></el-icon>新建任务</el-button></WorkspaceHeader>
       <div v-if="!isMobile" class="download-overview"><span><strong>{{tasks.length}}</strong> 个任务</span><span>下载 <strong>{{formatSpeed(statistic.speedDownload||0)}}</strong></span><span>上传 <strong>{{formatSpeed(statistic.speedUpload||0)}}</strong></span></div>
       <div v-if="isMobile" class="ds-header">
@@ -267,7 +266,7 @@ async function onPullRefresh() {
 
       <el-alert v-if="reason" :title="reason + '；当前数据可能不是最新状态'" type="warning" :closable="false" show-icon />
       <div class="ds-refresh-status"><span>{{ lastUpdate ? '最后更新 ' + lastUpdate : '尚未获取任务状态' }}</span><el-button link :loading="loading" @click="dsRefresh()">刷新状态</el-button></div>
-      <!-- 批量操作栏 -->
+
       <div v-if="selected.length" class="ds-batch">
         <span>已选 {{ selected.length }} 项</span>
         <el-button size="small" @click="handlePause">暂停</el-button>
@@ -275,7 +274,7 @@ async function onPullRefresh() {
         <el-button size="small" type="danger" @click="handleDelete">删除</el-button>
       </div>
 
-      <!-- 任务表（桌面） -->
+
       <div v-if="!isMobile" class="ds-body">
         <el-table
           v-if="tasks.length"
@@ -341,7 +340,7 @@ async function onPullRefresh() {
         </div>
       </div>
 
-      <!-- 任务列表（移动端） -->
+
       <div v-else class="ds-body">
         <van-empty v-if="!tasks.length" description="暂无下载任务">
           <van-button round type="primary" @click="createOpen = true">新建任务</van-button>
@@ -406,7 +405,7 @@ async function onPullRefresh() {
       <el-empty v-else description="任务已不存在，请刷新列表" />
       <template #footer><el-button :loading="loading" @click="dsRefresh()">刷新状态</el-button><el-button @click="detailOpen = false">关闭</el-button></template>
     </el-dialog>
-    <!-- 新建任务对话框 -->
+
     <el-dialog v-model="createOpen" title="新建下载任务" :width="dialogWidth" destroy-on-close>
       <el-form label-position="top">
         <el-form-item label="下载链接">
@@ -441,7 +440,7 @@ async function onPullRefresh() {
       </template>
     </el-dialog>
 
-    <!-- BT搜索对话框 -->
+
     <el-dialog v-model="btSearchOpen" title="BT 搜索" :width="dialogWidthLg" @close="closeBTSearch" destroy-on-close>
       <div class="bt-search-bar">
         <el-input
@@ -473,7 +472,7 @@ async function onPullRefresh() {
       </div>
     </el-dialog>
 
-    <!-- 目录选择器 -->
+
     <FolderPicker v-model="destPickerOpen" @confirm="onDestPicked" />
     </van-pull-refresh>
   </div>

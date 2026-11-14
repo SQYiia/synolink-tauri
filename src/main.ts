@@ -40,7 +40,7 @@ import {
 
 import App from './App.vue'
 import { router } from './router'
-import './composables/useNavDirection' // 注册 router.beforeEach 监听导航方向
+import './composables/useNavDirection'
 
 const app = createApp(App)
 app.use(createPinia())
@@ -48,7 +48,6 @@ app.use(router)
 app.use(ElementPlus, { locale: zhCn })
 app.use(Vant)
 
-// 按需注册用到的图标
 const icons = {
   Grid,
   Box,

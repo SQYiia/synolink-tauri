@@ -186,7 +186,7 @@ fn unique_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
     dir.join(format!("{}-{}{}", stem, std::process::id(), ext))
 }
 
-/// 用 task_id 前 8 字符生成唯一的临时文件名，避免同名文件并发下载冲突
+/// 临时文件名包含任务 ID，避免同名文件并发下载冲突
 fn part_filename(task_id: &str, name: &str) -> String {
     format!("{}.{}.synodownload", name, safe_filename(task_id))
 }
@@ -503,7 +503,7 @@ fn list_local_subdirs(app: tauri::AppHandle, parent: String) -> Result<Vec<Local
         }
         let name = entry.file_name().to_string_lossy().to_string();
         if name.starts_with('.') {
-            continue; // 跳过隐藏目录
+            continue;
         }
         out.push(LocalEntry {
             name,
@@ -824,7 +824,6 @@ async fn proxy(
         other => return Err(format!("unknown kind: {}", other)),
     };
 
-    // 缩略图本地缓存：命中直接返回 JPEG、不请求 NAS
     let cache_meta = if is_thumb {
         if let Some(app) = app.as_ref() {
             if let Some(dir) = thumb_cache_dir(app) {
@@ -943,7 +942,6 @@ async fn proxy(
     }
     builder = builder.header("Access-Control-Allow-Origin", "*");
 
-    // 缩略图请求成功后写入本地缓存
     if let Some((dir, key)) = cache_meta {
         if status.is_success() && image_mime(&bytes).is_some() {
             let dir_for_write = dir.clone();

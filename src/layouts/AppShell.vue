@@ -28,7 +28,6 @@ const app = useAppStore()
 const booting = ref(true)
 const isMobile = useIsMobile()
 
-// 全局搜索
 const globalSearchOpen = ref(false)
 const globalSearchQuery = ref('')
 const globalSearchResults = ref<any[]>([])
@@ -146,7 +145,7 @@ onUnmounted(()=>window.removeEventListener('keydown',desktopShortcut))
 
 const mobileTabs = [
   { to: '/app/dashboard', label: '首页', icon: 'wap-home-o' },
-  { to: '/app/files', label: '文件', icon: 'folder' /* 自定义 SVG */ },
+  { to: '/app/files', label: '文件', icon: 'folder' },
   { to: '/app/album', label: '相册', icon: 'photo-o' },
   { to: '/app/monitor', label: '性能', icon: 'bar-chart-o' },
   { to: '/app/me', label: '设置', icon: 'setting-o' },
@@ -187,7 +186,7 @@ function onTabChange(i: number) {
 </script>
 
 <template>
-  <!-- ========== 桌面端 ========== -->
+
   <div v-if="!isMobile" class="app-shell">
     <aside class="sidebar">
       <RouterLink class="sidebar-brand" to="/app/dashboard" aria-label="SynoLink 首页"><img class="brand-mark" src="/synolink-icon.svg" alt=""/><strong>SynoLink</strong></RouterLink>
@@ -233,7 +232,7 @@ function onTabChange(i: number) {
       </RouterView>
     </main>
 
-    <!-- 全局搜索对话框 -->
+
     <el-dialog v-model="globalSearchOpen" title="全局搜索" width="560px" top="8vh" destroy-on-close>
       <div class="gsearch-bar">
         <el-input
@@ -264,7 +263,7 @@ function onTabChange(i: number) {
       </div>
     </el-dialog>
 
-    <!-- 下载队列 -->
+
     <el-drawer v-model="downloadDrawerOpen" title="传输中心" direction="rtl" size="360px">
       <div class="dl-savedir">
         <div class="dl-savedir-label">保存位置</div>
@@ -320,7 +319,7 @@ function onTabChange(i: number) {
     </el-drawer>
   </div>
 
-  <!-- ========== 移动端 ========== -->
+
   <div v-else class="m-shell-container">
   <div class="m-shell" :style="swipeStyle" :class="swipeClasses">
     <van-nav-bar
@@ -375,7 +374,7 @@ function onTabChange(i: number) {
       </van-tabbar-item>
     </van-tabbar>
 
-    <!-- 全局搜索 popup -->
+
     <van-popup v-model:show="globalSearchOpen" position="top" round :style="{ height: '85vh', paddingTop: 'var(--sl-safe-top)' }">
       <div class="m-search-head">
         <van-search
@@ -404,7 +403,7 @@ function onTabChange(i: number) {
       <FileOperations />
     </van-popup>
 
-    <!-- 下载队列 popup -->
+
     <van-popup
       v-model:show="downloadDrawerOpen"
       position="bottom"
@@ -462,7 +461,7 @@ function onTabChange(i: number) {
       </van-cell-group>
     </van-popup>
 
-    <!-- iOS / 移动端 in-app 目录选择器 -->
+
     <LocalFolderPicker
       v-model="localPickerOpen"
       title="选择下载目录"

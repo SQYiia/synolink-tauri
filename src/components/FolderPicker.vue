@@ -153,7 +153,6 @@ function mPickCurrent() {
 
 watch(visible, async (v) => {
   if (v && isMobile.value) {
-    // 每次打开时重置到共享根
     selected.value = ''
     await mLoadShares()
   }
@@ -169,7 +168,7 @@ useBackHandler(() => {
 </script>
 
 <template>
-  <!-- 桌面端 -->
+
   <el-dialog v-if="!isMobile" v-model="visible" :title="title ?? '选择目录'" width="560px" append-to-body>
     <div style="height: 420px; overflow: auto; border: 1px solid var(--el-border-color-lighter); border-radius: 4px; padding: 6px">
       <el-tree
@@ -197,7 +196,7 @@ useBackHandler(() => {
     </template>
   </el-dialog>
 
-  <!-- 移动端：全屏 popup + 级联导航 -->
+
   <van-popup
     v-else
     v-model:show="visible"
@@ -217,7 +216,7 @@ useBackHandler(() => {
         @click-right="visible = false"
       />
 
-      <!-- 面包屑（横滑） -->
+
       <div class="m-fp-crumbs-wrap">
         <div class="m-fp-crumbs">
           <span class="m-fp-crumb-item" @click="mLoadShares">
@@ -231,7 +230,7 @@ useBackHandler(() => {
         </div>
       </div>
 
-      <!-- 列表区 -->
+
       <div class="m-fp-body">
         <van-loading v-if="mLoading" style="text-align: center; padding: 40px 0" />
         <van-empty v-else-if="!mFolders.length" description="此目录下没有子文件夹" />
@@ -249,7 +248,7 @@ useBackHandler(() => {
         </div>
       </div>
 
-      <!-- 底部固定操作栏 -->
+
       <div class="m-fp-actions">
         <div class="m-fp-current">
           <span class="m-fp-current-label">当前</span>

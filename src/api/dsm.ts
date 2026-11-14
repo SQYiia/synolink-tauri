@@ -7,7 +7,6 @@ import { invoke } from '@tauri-apps/api/core'
 const IS_WINDOWS = typeof navigator !== 'undefined' && /Windows|Android/i.test(navigator.userAgent)
 const DSM_SCHEME_BASE = IS_WINDOWS ? 'http://dsm.localhost' : 'dsm://localhost'
 
-/** DSM 统一响应结构（doc 1.4） */
 export interface DsmResponse<T = any> {
   success: boolean
   data?: T
@@ -37,7 +36,6 @@ export function setSessionRecoverer(fn: (() => Promise<boolean>) | null) {
 /** 防止并发重登；多个并发请求共享同一次重登 Promise。 */
 let reloginInflight: Promise<boolean> | null = null
 
-/** SYNO.API.Info 返回的单个 API 条目 */
 export interface ApiInfo {
   path: string
   minVersion: number
@@ -45,7 +43,6 @@ export interface ApiInfo {
   requestFormat?: string
 }
 
-/** 登录返回 */
 export interface AuthResult {
   sid?: string
   synotoken?: string
@@ -116,14 +113,12 @@ export class DsmClient {
     const started = Date.now()
     const requestIdentity = `${this.baseUrl}\n${this.account}`
     const method = opts.method ?? 'GET'
-    // 根据调用的 api 选择会话 sid：SYNO.DownloadStation.* 优先用 dsSid，其余用主 sid
     const apiName = (opts.form?.api as string | undefined) ?? (opts.query?.api as string | undefined) ?? ''
     const authParams = opts.form ?? opts.query
     const useDsSid = !!this.dsSid && (apiName.startsWith('SYNO.DownloadStation.') ||
       (apiName === 'SYNO.API.Auth' && authParams?.method === 'logout' && authParams?.session === 'DownloadStation'))
     const useDriveSid = !!this.driveSid && (apiName.startsWith('SYNO.SynologyDrive.') || (apiName === 'SYNO.API.Auth' && authParams?.method === 'logout' && authParams?.session === 'SynologyDrive'))
     const effectiveSid = useDriveSid ? this.driveSid : useDsSid ? this.dsSid : this.sid
-    // 注入 _sid（DSM session ID）
     const query = { ...(opts.query ?? {}) }
     const form = opts.form ? { ...opts.form } : undefined
     if (effectiveSid) {
@@ -169,7 +164,6 @@ export class DsmClient {
     } catch {
       throw new Error('服务器未返回有效数据，请检查地址或反向代理配置')
     }
-    // 会话失效（code=119 / 105 / 106 / 107）自动重登并重放一次
     const code = parsed?.error?.code
     const SESSION_LOST = code === 119 || code === 106 || code === 107
     if (this === dsm && opts.retrySession !== false && !_retried && parsed?.success === false && SESSION_LOST && sessionRecoverer) {
@@ -325,7 +319,6 @@ export class DsmClient {
     }
   }
 
-  /** 共享文件夹列表（doc 4.4 list_share） */
   async listShare(opts: { offset?: number; limit?: number; additional?: string } = {}) {
     return this.entry('SYNO.FileStation.List', 'list_share', {
       params: {
@@ -336,7 +329,6 @@ export class DsmClient {
     })
   }
 
-  /** 文件列表（doc 4.4 list） */
   async listFiles(folderPath: string, opts: { offset?: number; limit?: number; additional?: string; filetype?: 'all' | 'file' | 'dir' } = {}) {
     return this.entry('SYNO.FileStation.List', 'list', {
       params: {
@@ -349,7 +341,6 @@ export class DsmClient {
     })
   }
 
-  /** 只列目录（给目录选择器用） */
   async listFolders(folderPath: string) {
     return this.listAll(folderPath, undefined, 'dir')
   }
@@ -416,7 +407,6 @@ export class DsmClient {
     }
   }
 
-  /** 新建文件夹（doc 4.6 create） */
   async createFolder(folderPath: string, name: string, forceParent = false) {
     return this.entry('SYNO.FileStation.CreateFolder', 'create', {
       post: true,
@@ -424,7 +414,6 @@ export class DsmClient {
     })
   }
 
-  /** 重命名（doc 4.7 rename） */
   async rename(path: string, name: string) {
     return this.entry('SYNO.FileStation.Rename', 'rename', {
       post: true,
@@ -432,7 +421,6 @@ export class DsmClient {
     })
   }
 
-  /** 删除（blocking 模式，doc 4.12 delete） */
   async deletePath(path: string | string[], recursive = true) {
     const p = JSON.stringify(Array.isArray(path) ? path : [path])
     return this.entry('SYNO.FileStation.Delete', 'delete', {
@@ -441,7 +429,6 @@ export class DsmClient {
     })
   }
 
-  /** 复制或移动文件/文件夹（doc 4.9 start） */
   async copyMove(paths: string[], destFolder: string, overwrite = false, removeSource = false) {
     const p = JSON.stringify(paths)
     return this.entry<{ taskid: string }>('SYNO.FileStation.CopyMove', 'start', {
@@ -455,7 +442,6 @@ export class DsmClient {
     })
   }
 
-  /** 轮询复制/移动任务状态 */
   async copyMoveStatus(taskid: string) {
     return this.entry<{ finished: boolean; progress?: number }>('SYNO.FileStation.CopyMove', 'status', {
       params: { taskid },
@@ -539,7 +525,6 @@ export class DsmClient {
     return this.entry('SYNO.FileStation.Search', 'list', { params })
   }
 
-  /** 搜索：停止任务 */
   async searchStop(taskid: string) {
     return this.entry('SYNO.FileStation.Search', 'stop', { post: true, params: { taskid } })
   }
@@ -563,7 +548,6 @@ export class DsmClient {
     return `${this.baseUrl}/webapi/entry.cgi?${params.toString()}`
   }
 
-  /** 构造缩略图 URL（doc 4.5 thumb） */
   thumbUrl(path: string, size: 'small' | 'medium' | 'large' | 'original' = 'medium') {
     const info = this.apiInfo['SYNO.FileStation.Thumb']
     const cgi = info?.path ?? 'entry.cgi'
@@ -585,7 +569,6 @@ export class DsmClient {
     return h
   }
 
-  /** 拉取缩略图字节（绕过自签名证书） */
   async thumbBytes(path: string, size: 'small' | 'medium' | 'large' | 'original' = 'small'): Promise<ArrayBuffer> {
     return (await this.imageBlob('thumb', path, size)).arrayBuffer()
   }
@@ -742,7 +725,6 @@ export class DsmClient {
     return blob
   }
 
-  /** 文件上传 multipart（doc 4.9 upload） */
   async upload(folderPath: string, file: File, overwrite = false) {
     const info = this.apiInfo['SYNO.FileStation.Upload']
     const cgi = info?.path ?? 'entry.cgi'
@@ -773,7 +755,6 @@ export class DsmClient {
     }
   }
 
-  /** 获取文件字节（用于预览或本地保存） */
   async readSidecar(path: string, maxBytes: number): Promise<ArrayBuffer> {
     const res = await fetch(this.downloadUrl(path, 'open'), {
       headers: this.authHeaders(), signal: AbortSignal.timeout(15000),
@@ -808,17 +789,14 @@ export class DsmClient {
     return await res.arrayBuffer()
   }
 
-  /** 系统基础信息（doc SYNO.Core.System info） */
   async systemInfo() {
     return this.entry('SYNO.Core.System', 'info', { params: { type: 'storage' } })
   }
 
-  /** 资源占用（CPU/内存/网络/磁盘） */
   async systemUtilization() {
     return this.entry('SYNO.Core.System.Utilization', 'get', { params: { type: 'current' } })
   }
 
-  /** 存储卷/磁盘 */
   async storageInfo() {
     return this.entry('SYNO.Core.Storage.Volume', 'list', {
       params: { limit: -1, offset: 0, location: 'internal', option: 'none' },
@@ -831,7 +809,6 @@ export class DsmClient {
     })
   }
 
-  /** 构造 dsm:// 代理 URL（由 Rust 端转发并绕过自签名证书） */
   mediaUrl(kind: 'stream' | 'thumb' | 'image', path: string, extra: Record<string, string> = {}) {
     const params = new URLSearchParams({ path, scope: this.mediaScope, ...extra })
     return `${DSM_SCHEME_BASE}/${kind}?${params.toString()}`
@@ -839,17 +816,14 @@ export class DsmClient {
 
   // ─── Download Station ─────────────────────────────────────────────
 
-  /** DS 版本信息 */
   async dsInfo() {
     return this.entry('SYNO.DownloadStation.Info', 'getinfo')
   }
 
-  /** DS 配置 */
   async dsGetConfig() {
     return this.entry('SYNO.DownloadStation.Info', 'getconfig')
   }
 
-  /** 列出下载任务 */
   async dsTaskList(opts: { offset?: number; limit?: number; additional?: string } = {}) {
     return this.entry('SYNO.DownloadStation.Task', 'list', {
       params: {
@@ -860,14 +834,12 @@ export class DsmClient {
     })
   }
 
-  /** 获取指定任务详情 */
   async dsTaskGetInfo(ids: string[], additional = 'detail,transfer,file') {
     return this.entry('SYNO.DownloadStation.Task', 'getinfo', {
       params: { id: ids.join(','), additional },
     })
   }
 
-  /** 创建下载任务（URL/磁力链接） */
   async dsTaskCreate(params: {
     uri: string
     destination?: string
@@ -881,7 +853,6 @@ export class DsmClient {
     })
   }
 
-  /** 创建下载任务（torrent/nzb 文件上传） */
   async dsTaskCreateFile(file: File, destination?: string) {
     const info = this.apiInfo['SYNO.DownloadStation.Task']
     const cgi = info?.path ?? 'entry.cgi'
@@ -911,40 +882,34 @@ export class DsmClient {
     }
   }
 
-  /** 删除任务 */
   async dsTaskDelete(ids: string[], forceComplete = false) {
     return this.entry('SYNO.DownloadStation.Task', 'delete', {
       params: { id: ids.join(','), force_complete: forceComplete ? 'true' : 'false' },
     })
   }
 
-  /** 暂停任务 */
   async dsTaskPause(ids: string[]) {
     return this.entry('SYNO.DownloadStation.Task', 'pause', {
       params: { id: ids.join(',') },
     })
   }
 
-  /** 恢复任务 */
   async dsTaskResume(ids: string[]) {
     return this.entry('SYNO.DownloadStation.Task', 'resume', {
       params: { id: ids.join(',') },
     })
   }
 
-  /** 全局速度统计 */
   async dsStatistic() {
     return this.entry('SYNO.DownloadStation.Statistic', 'getinfo')
   }
 
-  /** 启动 BT 搜索 */
   async dsBTSearchStart(keyword: string, module = 'all') {
     return this.entry<{ taskid: string }>('SYNO.DownloadStation.BTSearch', 'start', {
       params: { keyword, module },
     })
   }
 
-  /** 获取 BT 搜索结果 */
   async dsBTSearchList(taskid: string, opts: {
     offset?: number; limit?: number;
     sort_by?: string; sort_direction?: string;
@@ -960,12 +925,10 @@ export class DsmClient {
     })
   }
 
-  /** 清除 BT 搜索任务 */
   async dsBTSearchClean(taskid: string) {
     return this.entry('SYNO.DownloadStation.BTSearch', 'clean', { params: { taskid } })
   }
 
-  /** 获取 BT 搜索模块 */
   async dsBTSearchModules() {
     return this.entry('SYNO.DownloadStation.BTSearch', 'getModule')
   }
@@ -1086,19 +1049,16 @@ export class DsmClient {
     return this.entry('SYNO.DownloadStation.Info', 'setserverconfig', { post: true, params })
   }
 
-  /** 列出主机 */
   async vmmHostList() {
     return this.entry('SYNO.Virtualization.API.Host', 'list')
   }
 
-  /** 列出虚拟机 */
   async vmmGuestList(additional = true) {
     return this.entry('SYNO.Virtualization.API.Guest', 'list', {
       params: { additional },
     })
   }
 
-  /** 获取指定虚拟机信息 */
   async vmmGuestGet(opts: { guest_id?: string; guest_name?: string }) {
     return this.entry('SYNO.Virtualization.API.Guest', 'get', {
       params: { ...opts, additional: true },
@@ -1109,37 +1069,31 @@ export class DsmClient {
     return this.entry('SYNO.Virtualization.API.Guest', 'set', { params: { guest_id: guestId, ...settings } })
   }
 
-  /** 虚拟机开机 */
   async vmmGuestPowerOn(guestId: string) {
     return this.entry('SYNO.Virtualization.API.Guest.Action', 'poweron', {
       params: { guest_id: guestId },
     })
   }
 
-  /** 虚拟机正常关机 */
   async vmmGuestShutdown(guestId: string) {
     return this.entry('SYNO.Virtualization.API.Guest.Action', 'shutdown', {
       params: { guest_id: guestId },
     })
   }
 
-  /** 虚拟机强制关机 */
   async vmmGuestPowerOff(guestId: string) {
     return this.entry('SYNO.Virtualization.API.Guest.Action', 'poweroff', {
       params: { guest_id: guestId },
     })
   }
 
-  /** VMM 存储列表 */
   async vmmStorageList() {
     return this.entry('SYNO.Virtualization.API.Storage', 'list')
   }
 
-  /** VMM 网络列表 */
   async vmmNetworkList() {
     return this.entry('SYNO.Virtualization.API.Network', 'list')
   }
 }
 
-/** 单例 */
 export const dsm = new DsmClient()

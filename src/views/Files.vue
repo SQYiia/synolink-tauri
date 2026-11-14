@@ -140,7 +140,6 @@ watch(items, () => { contextOpen.value = false })
 onDeactivated(() => { contextOpen.value = false })
 function onSelectionChange(rows: any[]) { selection.value = rows }
 
-// 移动端选择模式
 const selectMode = ref(false)
 const selectedPaths = ref<Set<string>>(new Set())
 function toggleSelect(row: any) {
@@ -552,7 +551,6 @@ async function preview(row: any) {
       const blob = new Blob([buf], { type: 'image/*' })
       previewSrc.value = URL.createObjectURL(blob)
       if (isMobile.value) {
-        // 用 Vant ImagePreview 支持双指缩放、横滑
         showImagePreview({
           images: [previewSrc.value],
           showIndex: false,
@@ -651,7 +649,6 @@ function shortDate(epoch: number): string {
   return `${String(d.getFullYear()).slice(2)}/${mm}/${dd}`
 }
 
-// ========== 移动端 ActionSheet（声明式） ==========
 const sheetOpen = ref(false)
 const sheetActions = ref<ActionSheetAction[]>([])
 function openSheet(actions: ActionSheetAction[]) {
@@ -730,7 +727,7 @@ watch(operationScope,()=>{if(operationScope.value===filesIdentity)return;filesId
 </script>
 
 <template>
-  <FileToolsDialog ref="fileTools" /><BatchRenameDialog ref="batchRenameDialog" /><RecycleBinDialog ref="recycleBin" /><!-- ========== 桌面端 ========== -->
+  <FileToolsDialog ref="fileTools" /><BatchRenameDialog ref="batchRenameDialog" /><RecycleBinDialog ref="recycleBin" />
   <el-container v-if="!isMobile" class="page ui-files">
     <el-header>
       <div class="file-heading">
@@ -844,9 +841,9 @@ watch(operationScope,()=>{if(operationScope.value===filesIdentity)return;filesId
     />
   </el-container>
 
-  <!-- ========== 移动端 ========== -->
+
   <div v-else class="m-files">
-    <!-- 顶部：返回 + 当前目录 + 面包屑 + 搜索 -->
+
     <div class="m-files-head">
       <div class="m-files-bar">
         <button
@@ -907,7 +904,7 @@ watch(operationScope,()=>{if(operationScope.value===filesIdentity)return;filesId
       </div>
     </div>
 
-    <!-- 多选工具栏 -->
+
     <div v-if="selectMode" class="m-batch-bar">
       <div class="m-batch-info">已选 {{ selectedPaths.size }} 项</div>
       <van-button size="mini" @click="batchDownload">下载</van-button>
@@ -928,7 +925,7 @@ watch(operationScope,()=>{if(operationScope.value===filesIdentity)return;filesId
           :class="{ 'm-row-selected': selectedPaths.has(row.path) }"
           @click="tapRow(row)" @pointerdown="beginHold($event,row)" @pointerup="cancelHold" @pointercancel="cancelHold" @pointermove="moveHold" @contextmenu.prevent
         >
-          <!-- 左：图标 / 缩略图 / 选择框 -->
+
           <div class="m-row-left">
             <van-checkbox
               v-if="selectMode"
@@ -950,7 +947,7 @@ watch(operationScope,()=>{if(operationScope.value===filesIdentity)return;filesId
             />
           </div>
 
-          <!-- 中：文件名 + meta -->
+
           <div class="m-row-mid">
             <div class="m-row-name">{{ row.name }}</div>
             <div class="m-row-meta">
@@ -961,7 +958,7 @@ watch(operationScope,()=>{if(operationScope.value===filesIdentity)return;filesId
             </div>
           </div>
 
-          <!-- 右：操作 / 进入 -->
+
           <button
             v-if="!selectMode"
             class="m-row-action"
@@ -978,16 +975,16 @@ watch(operationScope,()=>{if(operationScope.value===filesIdentity)return;filesId
       </div>
     </van-pull-refresh>
 
-    <!-- 文件上传隐藏 input -->
+
     <input ref="uploadInput" type="file" multiple style="display:none" @change="onUploadPicked" />
 
-    <!-- 浮动操作按钮 (FAB) -->
+
     <div v-if="!selectMode" class="m-fab-group">
       <van-button v-if="canUpload" round type="primary" icon="upgrade" class="m-fab" @click="triggerUpload" />
       <van-button round icon="ellipsis" class="m-fab m-fab-more" @click="openMoreSheet" />
     </div>
 
-    <!-- 视频/音频/文本预览 popup（图片走 ImagePreview） -->
+
     <van-popup
       v-model:show="previewOpen"
       position="bottom"
@@ -1133,7 +1130,6 @@ a { cursor: pointer; color: var(--sl-primary); }
 .m-files-fav:active { background: hsl(var(--muted)); }
 .m-files-fav.active { color: hsl(38 92% 50%); }
 
-/* 面包屑：横向滚动 + 两端渐变蒙板 */
 .m-crumbs-wrap {
   position: relative;
   padding: 6px 0 10px;
@@ -1198,7 +1194,6 @@ a { cursor: pointer; color: var(--sl-primary); }
 }
 .m-batch-info { flex: 1; min-width: 0; color: hsl(var(--foreground)); font-weight: 500; }
 
-/* shadcn-style 列表卡片 */
 .m-list {
   background: hsl(var(--card));
   border: 1px solid hsl(var(--border));

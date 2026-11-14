@@ -77,7 +77,7 @@ async function remove(id: string) {
 </script>
 
 <template>
-  <!-- 桌面端 -->
+
   <div v-if="!isMobile" class="page ui-servers">
     <header class="hero">
       <div class="hero-text">
@@ -125,7 +125,7 @@ async function remove(id: string) {
     </main>
   </div>
 
-  <!-- 移动端 -->
+
   <div v-else class="m-page">
     <van-nav-bar title="SynoLink" fixed placeholder safe-area-inset-top>
       <template #right>

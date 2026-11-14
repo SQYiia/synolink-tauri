@@ -85,7 +85,7 @@ function onProtocolChange(v: string | number | boolean | undefined) {
 </script>
 
 <template>
-  <!-- 桌面端 -->
+
   <div v-if="!isMobile" class="page ui-add-server">
     <div class="form-wrapper">
       <el-button class="back-btn" @click="back" circle>
@@ -127,7 +127,7 @@ function onProtocolChange(v: string | number | boolean | undefined) {
     </div>
   </div>
 
-  <!-- 移动端 -->
+
   <div v-else class="m-add">
     <van-nav-bar title="添加服务器" left-arrow fixed placeholder safe-area-inset-top @click-left="back" />
 

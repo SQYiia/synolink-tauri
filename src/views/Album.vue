@@ -53,7 +53,6 @@ const GAP = 4
 const HEADER_HEIGHT = 40
 const BUFFER = computed(() => isMobile.value ? cellSize.value * 2 : 800)
 
-// 移动端用更小的格子
 const MIN_COL_WIDTH = computed(() => isMobile.value ? 110 : 140)
 
 const colCount = computed(() => {
@@ -267,7 +266,6 @@ function fallbackOf(p: any) {
   return size <= 64 * 1024 * 1024 && !/\.hei[cf]$/i.test(p.name) ? dsm.mediaUrl('image', p.path) : ''
 }
 
-// 移动端图片预览状态（组件式，比 showImagePreview 命令式更可控）
 const mPreviewOpen = ref(false)
 const mPreviewIndex = ref(0)
 const mPreviewStart = ref(0)
@@ -388,12 +386,10 @@ onBeforeUnmount(() => {
   if (floatingDateTimer) clearTimeout(floatingDateTimer)
 })
 
-// 移动端：选择目录后自动开扫
 async function onMobilePickFolder(p: string) {
   onPickFolder(p)
 }
 
-// 移动端图片预览的删除/下载（操作当前预览中的图）
 async function mDeleteCurrent() {
   const p = previewPhotos.value[mPreviewIndex.value]
   if (!p) return
@@ -431,7 +427,7 @@ useBackHandler(() => {
 </script>
 
 <template>
-  <!-- 桌面端 -->
+
   <div v-if="!isMobile" class="page ui-album">
     <header class="topbar">
       <h2 class="title">相册</h2>
@@ -520,7 +516,7 @@ useBackHandler(() => {
     <FolderPicker v-model="pickerOpen" :initial="folder" title="选择相册目录" @confirm="onPickFolder" />
   </div>
 
-  <!-- 移动端 -->
+
   <div v-else class="m-album">
     <header class="m-album-head">
       <div class="album-heading"><h2>照片</h2><span v-if="folder">{{ photos.length.toLocaleString() }} 张</span></div>
@@ -586,7 +582,7 @@ useBackHandler(() => {
 
     <FolderPicker v-model="pickerOpen" :initial="folder" title="选择相册目录" @confirm="onMobilePickFolder" />
 
-    <!-- 移动端图片预览 -->
+
     <van-image-preview v-model:show="mPreviewOpen" :images="mPreviewImages" :start-position="mPreviewStart"
       closeable show-index @change="mPreviewIndex = $event">
       <template #cover>

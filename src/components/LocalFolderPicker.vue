@@ -95,7 +95,6 @@ async function mkdir() {
     })
     toast('已创建', 'success')
     await load(currentDir.value)
-    // 自动进入新建的目录
     await load(created)
   } catch (e: any) {
     toast('创建失败：' + (e?.message ?? e), 'error')
@@ -123,7 +122,7 @@ useBackHandler(() => {
 </script>
 
 <template>
-  <!-- 桌面端：弹窗 -->
+
   <el-dialog
     v-if="!isMobile"
     v-model="visible"
@@ -153,7 +152,7 @@ useBackHandler(() => {
     </template>
   </el-dialog>
 
-  <!-- 移动端：全屏 popup -->
+
   <van-popup
     v-else
     v-model:show="visible"
@@ -173,7 +172,7 @@ useBackHandler(() => {
         @click-right="visible = false"
       />
 
-      <!-- 面包屑 -->
+
       <div class="lfp-crumbs-wrap">
         <div class="lfp-crumbs">
           <span class="lfp-crumb" @click="load(rootDir)">
@@ -187,12 +186,12 @@ useBackHandler(() => {
         </div>
       </div>
 
-      <!-- 新建按钮 -->
+
       <div class="lfp-actions">
         <van-button size="small" plain icon="plus" @click="mkdir">新建文件夹</van-button>
       </div>
 
-      <!-- 列表 -->
+
       <div class="lfp-body">
         <van-loading v-if="loading" style="text-align: center; padding: 40px 0" />
         <van-empty v-else-if="!folders.length" description="此目录为空" />
@@ -210,7 +209,7 @@ useBackHandler(() => {
         </div>
       </div>
 
-      <!-- 底部确认 -->
+
       <div class="lfp-foot">
         <div class="lfp-foot-path">{{ relPath ? `App 内/${relPath}` : 'App 内根目录' }}</div>
         <van-button type="primary" block round @click="pick">选择此目录</van-button>

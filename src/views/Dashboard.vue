@@ -186,7 +186,7 @@ onUnmounted(() => {
 
   <div v-else class="dash-page ui-dashboard">
     <WorkspaceHeader title="概览" description="设备状态与常用功能，一目了然。"><el-button @click="refreshUtil"><el-icon><Refresh /></el-icon>刷新状态</el-button></WorkspaceHeader>
-    <!-- 顶部个人栏 -->
+
     <div class="dash-profile">
       <div class="dash-profile-left">
         <div class="dash-avatar">
@@ -200,7 +200,7 @@ onUnmounted(() => {
       <el-button @click="router.push('/app/monitor')">查看性能<el-icon><ArrowRight /></el-icon></el-button>
     </div>
 
-    <!-- 状态卡片 2x2 -->
+
     <div class="dash-stats">
       <div class="dash-stat-card">
         <div class="dash-stat-icon" style="background: rgba(59,130,246,0.1); color: #3B82F6">
@@ -246,7 +246,7 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 功能宫格 -->
+
     <div class="dash-section-title">
       常用功能
       <el-button size="small" link @click="editing = !editing">
@@ -316,7 +316,6 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-/* 状态卡片 */
 .dash-stats {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -369,7 +368,6 @@ onUnmounted(() => {
   margin-top: 2px;
 }
 
-/* 功能宫格 */
 .dash-section-title {
   display: flex;
   align-items: center;

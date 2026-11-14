@@ -72,7 +72,6 @@ onMounted(async () => {
 
 async function promptOtp(): Promise<string | null> {
   if (isMobile.value) {
-    // iOS WebView 原生 prompt 体验最佳
     const v = window.prompt('请输入两步验证 OTP 码', '')
     if (!v) return null
     if (!/^\d+$/.test(v)) {
@@ -154,7 +153,7 @@ async function submit() {
     loading.value = false
     form.otp_code=''
   }
-  void showDialog // 触发 import 保留
+  void showDialog
 }
 
 function back() {
@@ -163,7 +162,7 @@ function back() {
 </script>
 
 <template>
-  <!-- 桌面端 -->
+
   <div v-if="autoConnecting" class="page ui-login"><div class="login-card" role="status"><el-icon class="is-loading" :size="28"><Loading /></el-icon><h2>{{server?.name || '连接服务器'}}</h2><p>正在使用已保存的密码登录…</p></div></div>
   <div v-else-if="!isMobile" class="page ui-login">
     <div class="login-wrapper">
@@ -192,7 +191,7 @@ function back() {
     </div>
   </div>
 
-  <!-- 移动端 -->
+
   <div v-else class="m-login">
     <van-nav-bar left-arrow :title="server?.name || server?.host || '登录'" fixed placeholder safe-area-inset-top @click-left="back" />
     <div class="m-login-body">

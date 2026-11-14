@@ -3,13 +3,9 @@ import { computed } from 'vue'
 import FolderIcon from './FolderIcon.vue'
 
 const props = defineProps<{
-  /** 文件名（用于推断扩展名） */
   name: string
-  /** 是否目录（优先级最高） */
   isDir?: boolean
-  /** 外框宽高，正方形，默认 40 */
   size?: number
-  /** 圆角，默认 10 */
   radius?: number
 }>()
 
@@ -18,14 +14,11 @@ interface IconDef {
   to: string
   /** Vant 字体图标名（folder 例外，因为 Vant 没有 folder 图标） */
   icon: string
-  /** 可选：右下角标签（PDF、ZIP 等） */
   badge?: string
 }
 
-// shadcn 风：纯色背景 + 单色描边图标，去掉渐变与浓饱和度
-// 颜色采用扁平化柔和色，与 muted/border 调性一致
 const ICONS: Record<string, IconDef> = {
-  folder:  { from: '#3B82F6', to: '#3B82F6', icon: '' /* 用 FolderIcon 组件 */ },
+  folder:  { from: '#3B82F6', to: '#3B82F6', icon: '' },
   image:   { from: '#10B981', to: '#10B981', icon: 'photo-o' },
   video:   { from: '#8B5CF6', to: '#8B5CF6', icon: 'video-o' },
   audio:   { from: '#EC4899', to: '#EC4899', icon: 'music-o' },

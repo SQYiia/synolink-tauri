@@ -21,7 +21,6 @@ router.beforeEach((to, from) => {
   prevPosition = newPos
 })
 
-/** 给 <Transition :name="..."> 用 */
 export function transitionName(): string {
   if (navDirection.value === 'back') return 'slide-back'
   if (navDirection.value === 'forward') return 'slide-fwd'

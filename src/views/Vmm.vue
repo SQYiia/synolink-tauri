@@ -110,7 +110,7 @@ async function onPullRefresh() {
   <div class="vmm-page">
     <van-pull-refresh v-model="refreshing" @refresh="onPullRefresh" :disabled="!isMobile">
     <el-alert v-if="reason" :title="reason" type="warning" :closable="false" show-icon />
-    <!-- 未安装提示 -->
+
     <div v-if="!available" class="vmm-unavailable">
       <el-icon :size="40"><Monitor /></el-icon>
       <h3>Virtual Machine Manager 不可用</h3>
@@ -119,10 +119,10 @@ async function onPullRefresh() {
     </div>
 
     <template v-else>
-      <!-- 顶部栏（桌面） -->
+
       <WorkspaceHeader v-if="!isMobile" title="虚拟机" description="查看运行状态、调整配置与管理电源。"><el-button :loading="loading" @click="refresh"><el-icon><Refresh /></el-icon>刷新</el-button></WorkspaceHeader>
 
-      <!-- 主机信息 -->
+
       <div v-if="hosts.length" class="vmm-section">
         <div class="vmm-section-title">主机</div>
         <div class="vmm-host-grid">
@@ -147,7 +147,7 @@ async function onPullRefresh() {
         </div>
       </div>
 
-      <!-- 虚拟机列表 -->
+
       <div class="vmm-section">
         <div class="vmm-section-title">虚拟机 ({{ guests.length }})</div>
         <div v-if="guests.length" class="vmm-grid">
@@ -170,7 +170,7 @@ async function onPullRefresh() {
               </div>
             </div>
             <div v-if="g.description" class="vmm-card-desc">{{ g.description }}</div>
-            <!-- 桌面操作按钮 -->
+
             <div v-if="!isMobile" class="vmm-card-actions">
               <el-button size="small" @click="openDetails(g)">详情与配置</el-button>
               <el-button
@@ -197,7 +197,7 @@ async function onPullRefresh() {
                 <span style="font-size: 12px; margin-left: 4px">处理中…</span>
               </span>
             </div>
-            <!-- 移动端单一 "操作" 按钮，点开 ActionSheet -->
+
             <div v-else class="vmm-card-actions">
               <van-button
                 v-if="!isTransitioning(g.status)"
@@ -219,7 +219,7 @@ async function onPullRefresh() {
         </div>
       </div>
 
-      <!-- 存储信息 -->
+
       <div v-if="storages.length" class="vmm-section">
         <div class="vmm-section-title">VMM 存储</div>
         <div class="vmm-storage-list">
@@ -331,7 +331,6 @@ async function onPullRefresh() {
   margin-bottom: 8px;
 }
 
-/* 主机卡片 */
 .vmm-host-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -355,7 +354,6 @@ async function onPullRefresh() {
 .vmm-host-stat-label { color: var(--el-text-color-secondary); }
 .vmm-host-stat-val { color: var(--el-text-color-primary); font-weight: 500; }
 
-/* 虚拟机卡片 */
 .vmm-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -427,7 +425,6 @@ async function onPullRefresh() {
   color: var(--el-text-color-secondary);
 }
 
-/* 存储 */
 .vmm-storage-list { display: flex; flex-direction: column; gap: 8px; }
 .vmm-storage-card {
   background: var(--sl-bg-card);

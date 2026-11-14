@@ -145,7 +145,6 @@ export async function revealSavedFile(savePath: string) {
   }
 }
 
-/** Rust 端事件载荷 */
 interface ProgressPayload { taskId: string; loaded: number; total: number }
 interface DonePayload { taskId: string; savePath: string }
 interface ErrorPayload { taskId: string; error: string }

@@ -62,7 +62,6 @@ async function primeIOSLocalNetworkPermission(probeUrl?: string): Promise<boolea
   }
 }
 
-/** 从 store 拿第一个服务器的 URL 作为探测目标 */
 function getProbeUrl(): string | undefined {
   const s = app.servers[0]
   if (!s) return undefined
@@ -99,7 +98,7 @@ onMounted(() => {
   <router-view />
   <AppUpdateDialog />
 
-  <!-- 首次启动：解释为什么要本地网络权限，确认后触发系统弹窗 -->
+
   <van-dialog
     v-model:show="onboardingOpen"
     title="允许访问本地网络"
@@ -125,7 +124,7 @@ onMounted(() => {
     </template>
   </van-dialog>
 
-  <!-- 检测到被拒绝：阻断式遮罩 + 重试 / 跳设置 -->
+
   <van-dialog
     v-model:show="iosNetworkBlocked"
     title="本地网络权限未开启"
