@@ -108,6 +108,7 @@ export class DsmClient {
       method?: 'GET' | 'POST'
       query?: Record<string, any>
       form?: Record<string, any>
+      retrySession?: boolean
       headers?: Record<string, string>
     } = {},
     _retried = false,
@@ -171,7 +172,7 @@ export class DsmClient {
     // 会话失效（code=119 / 105 / 106 / 107）自动重登并重放一次
     const code = parsed?.error?.code
     const SESSION_LOST = code === 119 || code === 106 || code === 107
-    if (this === dsm && !_retried && parsed?.success === false && SESSION_LOST && sessionRecoverer) {
+    if (this === dsm && opts.retrySession !== false && !_retried && parsed?.success === false && SESSION_LOST && sessionRecoverer) {
       // 登出登入接口自身不走恢复，避免死循环
       const isAuthCall = (opts.form?.api === 'SYNO.API.Auth') || (opts.query?.api === 'SYNO.API.Auth') || path.endsWith('/auth.cgi')
       if (!isAuthCall) {
@@ -211,7 +212,7 @@ export class DsmClient {
   async entry<T = any>(
     api: string,
     method: string,
-    opts: { post?: boolean; params?: Record<string, any> } = {},
+    opts: { post?: boolean; params?: Record<string, any>; retrySession?: boolean } = {},
   ): Promise<DsmResponse<T>> {
     const full = {
       api,
@@ -224,10 +225,10 @@ export class DsmClient {
     if (opts.post) {
       return this.request<DsmResponse<T>>(url, {
         method: 'POST',
-        form: full,
+        form: full, retrySession: opts.retrySession,
       })
     }
-    return this.request<DsmResponse<T>>(url, { query: full })
+    return this.request<DsmResponse<T>>(url, { query: full, retrySession: opts.retrySession })
   }
 
   /** 明文登录（doc 3.1 method=login）
@@ -982,6 +983,16 @@ export class DsmClient {
     if (!info) throw new Error('当前 NAS 未提供备份任务接口，请检查套件是否已安装并启用')
     if (!Number.isInteger(info.minVersion) || !Number.isInteger(info.maxVersion) || info.minVersion < 1 || info.maxVersion < info.minVersion) throw new Error('备份接口版本信息无效，请重新连接 NAS')
     return info.minVersion
+  }
+  async hyperBackupRequest(api: 'SYNO.Backup.Task'|'SYNO.Backup.Repository'|'SYNO.Backup.Storage.Share.Local', method: string, params: Record<string,unknown> = {}, post = false) {
+    const allowed:Record<string,string[]>={'SYNO.Backup.Task':['create','backup','cancel','suspend','resume','status','list'],'SYNO.Backup.Repository':['create'],'SYNO.Backup.Storage.Share.Local':['list']}
+    if(!allowed[api]?.includes(method))throw Error('不支持的备份操作')
+    const info=this.apiInfo[api]
+    if(!info||!Number.isInteger(info.minVersion)||!Number.isInteger(info.maxVersion)||info.minVersion!==1||info.maxVersion<1)throw Error('当前 NAS 未提供兼容的备份管理接口')
+    const write=!['status','list'].includes(method)
+    if(write&&!post)throw Error('备份写入操作必须显式提交')
+    const encoded=Object.fromEntries(Object.entries(params).map(([key,value])=>[key,value!==null&&typeof value==='object'?JSON.stringify(value):value]))
+    return this.entry(api,method,{post:write,retrySession:!write,params:{...encoded,version:1}})
   }
   async hyperBackupTasks() {
     return this.entry('SYNO.Backup.Task', 'list', { params: { version: this.backupVersion('SYNO.Backup.Task'), additional: JSON.stringify(['last_bkp_time', 'last_bkp_result']) } })

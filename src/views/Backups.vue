@@ -2,6 +2,7 @@
 import WorkspaceHeader from '../components/WorkspaceHeader.vue'
 import PhotoBackupPanel from '../components/PhotoBackupPanel.vue'
 import ComputerBackupPanel from '../components/ComputerBackupPanel.vue'
+import HyperBackupPanel from '../components/HyperBackupPanel.vue'
 import {isAndroid} from '../utils/platform'
 import { computed, onMounted, onActivated, onDeactivated, onUnmounted, ref } from 'vue'
 import { dsm } from '../api/dsm'
@@ -12,7 +13,7 @@ const tasks = ref<Task[]>([]), busy = ref(false), errors = ref<string[]>([]), un
 const visible = computed(()=>tasks.value.filter(t=>t.name.toLowerCase().includes(query.value.toLowerCase())))
 const detail = ref<Task | null>(null), detailError = ref(''), detailBusy = ref(false), detailData = ref<any>(null)
 let generation = 0, detailGeneration = 0, active = false, context = '', timer: ReturnType<typeof setInterval> | undefined
-const providers = [{name:'Hyper Backup',api:'SYNO.Backup.Task',key:'task_list',load:()=>dsm.hyperBackupTasks()}, {name:'Active Backup for Business',api:'SYNO.ActiveBackup.Task',key:'tasks',load:()=>dsm.activeBackupTasks()}]
+const providers = [{name:'Active Backup for Business',api:'SYNO.ActiveBackup.Task',key:'tasks',load:()=>dsm.activeBackupTasks()}]
 function current(){return JSON.stringify([dsm.baseUrl,dsm.account,dsm.sid])}
 async function refresh(){
   if(busy.value && context===current())return
@@ -61,12 +62,13 @@ onDeactivated(stop);onUnmounted(stop)
 </script>
 <template>
 <section class="backup-page"><WorkspaceHeader title="备份中心" :description="'查看备份任务与最近执行结果'+(updated?'，更新于 '+updated:'')"><el-button :loading="busy" @click="refresh">刷新任务</el-button></WorkspaceHeader><ComputerBackupPanel/><PhotoBackupPanel v-if="isAndroid"/>
-<div class="nas-backup-heading"><div><h2>NAS 备份任务</h2><p>查看 Hyper Backup 与 Active Backup for Business 中已有的任务。创建、执行和恢复备份请在 DSM 对应套件中操作。</p></div><router-link to="/app/applications">检查备份套件</router-link></div>
+<HyperBackupPanel/>
+<div class="nas-backup-heading"><div><h2>Active Backup for Business</h2><p>查看已有任务。此套件的任务创建、执行和恢复请在 DSM 中操作。</p></div><router-link to="/app/applications">检查备份套件</router-link></div>
 <el-alert v-for="message in errors" :key="message" :title="message" type="warning" :closable="false" show-icon />
 <el-alert v-if="unavailable.length" :title="unavailable.join('、') + ' 的任务接口不可用，请检查对应套件是否已安装并启用。'" type="info" :closable="false" show-icon />
 <div class="backup-toolbar"><el-input v-model="query" placeholder="搜索备份任务" aria-label="搜索备份任务" clearable/><span>{{tasks.length}} 个已读取任务</span></div>
 <div class="backup-grid" v-loading="busy" :aria-busy="busy"><article v-for="(task,index) in visible" :key="task.provider + (task.id || index)" class="backup-card"><small>{{task.provider}}</small><h3>{{task.name}}</h3><el-tag :type="backupResult(task.result).tone">最近结果：{{backupResult(task.result).label}}</el-tag><dl><dt>任务状态</dt><dd>{{task.status}}</dd><dt>最近执行</dt><dd>{{displayTime(task.time)}}</dd><dt>下次执行</dt><dd>{{displayTime(task.next)}}</dd></dl><el-button @click="showDetail(task)">查看详情</el-button></article></div>
-<el-empty v-if="!busy && !visible.length" :description="errors.length ? '部分任务读取失败，请查看上方提示' : unavailable.length === 2 ? '暂无可用的备份套件接口' : query ? '没有匹配任务' : '暂无备份任务'" />
+<el-empty v-if="!busy && !visible.length" :description="errors.length ? '部分任务读取失败，请查看上方提示' : unavailable.length === 1 ? '暂无可用的备份套件接口' : query ? '没有匹配任务' : '暂无备份任务'" />
 <el-dialog :model-value="!!detail" title="备份任务详情" width="min(600px,94vw)" @update:model-value="detail=null;detailGeneration++"><template v-if="detail"><h3>{{detail.name}}</h3><el-alert v-if="detailError" :title="detailError" type="warning" :closable="false"/><el-descriptions v-loading="detailBusy" :column="1" border><el-descriptions-item label="套件">{{detail.provider}}</el-descriptions-item><el-descriptions-item label="最近结果">{{backupResult(detailData ? detailData.result : detail.result).label}}</el-descriptions-item><el-descriptions-item label="最近执行">{{displayTime(detailData ? detailData.time : detail.time)}}</el-descriptions-item><el-descriptions-item label="下次执行">{{displayTime(detailData ? detailData.next : detail.next)}}</el-descriptions-item><el-descriptions-item v-if="detailData?.error" label="NAS 错误">{{detailData.error}}</el-descriptions-item></el-descriptions><p class="note">此页面仅查看任务状态。未返回的结果不会被当作备份成功。</p></template></el-dialog>
 </section>
 </template>

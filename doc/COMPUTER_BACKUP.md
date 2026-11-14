@@ -1,6 +1,6 @@
 # Windows 电脑文件夹备份（0.1.19 预览）
 
-本批按用户选择，先交付电脑文件夹 → NAS 的手动完整备份。Hyper Backup 的创建、执行和恢复操作尚未接入；NAS 任务区域仍为只读，后续单独实现并验收。Android 保留原有手机相册备份，不显示 Windows 本地目录入口。
+本批按用户选择，先交付电脑文件夹 → NAS 的手动完整备份。后续已增加 Hyper Backup 本地／USB 目标创建及执行管理，详见 [HYPER_BACKUP.md](HYPER_BACKUP.md)；恢复操作仍未接入。Android 保留原有手机相册备份，不显示 Windows 本地目录入口。
 
 ## 使用
 

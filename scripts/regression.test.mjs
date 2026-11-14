@@ -418,3 +418,8 @@ test('package management uses verified DSM fields, checks signatures and preserv
  await c.packageInstall({id:'demo'},'','upload2',true);assert.equal(calls.at(-1).method,'upgrade')
  await assert.rejects(c.packageDownload({id:'demo',link:'https://packages.example.com/demo',size:100,md5:''}))
 })
+
+test('Hyper Backup writes never automatically replay after session failure',async()=>{
+ let calls=0,recoveries=0;const api=loadClient(async()=>{calls++;return new Response(JSON.stringify({success:false,error:{code:119}}))});api.dsm.baseUrl='https://nas';api.dsm.sid='old-session';api.dsm.apiInfo={'SYNO.Backup.Task':{path:'entry.cgi',minVersion:1,maxVersion:1}};api.setSessionRecoverer(async()=>{recoveries++;return true});
+ const result=await api.dsm.hyperBackupRequest('SYNO.Backup.Task','backup',{task_id:'123'},true);assert.equal(result.success,false);assert.equal(calls,1);assert.equal(recoveries,0);
+})
