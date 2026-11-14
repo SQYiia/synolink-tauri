@@ -190,7 +190,7 @@ function onTabChange(i: number) {
   <!-- ========== 桌面端 ========== -->
   <div v-if="!isMobile" class="app-shell">
     <aside class="sidebar">
-      <RouterLink class="sidebar-brand" to="/app/dashboard" aria-label="SynoLink 首页"><span class="brand-mark"><el-icon><Connection /></el-icon></span><strong>SynoLink</strong></RouterLink>
+      <RouterLink class="sidebar-brand" to="/app/dashboard" aria-label="SynoLink 首页"><img class="brand-mark" src="/synolink-icon.svg" alt=""/><strong>SynoLink</strong></RouterLink>
       <RouterLink class="desktop-server" to="/servers" title="管理服务器"><el-icon><Monitor /></el-icon><span><strong>{{desktopServer}}</strong><small>{{desktopAccount}}</small></span><el-icon class="server-chevron"><ArrowRight /></el-icon></RouterLink>
       <nav class="sidebar-nav" aria-label="主导航">
        <section v-for="group in desktopGroups" :key="group.label" class="nav-group"><h2>{{group.label}}</h2>

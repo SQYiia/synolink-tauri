@@ -45,3 +45,11 @@
 按用户本次要求生成本地 Windows 安装 EXE 和独立应用 EXE，输出到 `.npm-cache/deliverables/windows-ui-20261114/`，附 SHA256SUMS.txt。版本保持 0.1.19，文件名标注 UI-preview，未创建 GitHub Release；未执行安装器，不将编译和浏览器检查表述为原生安装验收。
 
 相册/视频库的专属布局、原生 WebView2 系统缩放与安卓真机验收仍需后续完成。
+# 文件页与应用标识补充（2026-11-14）
+
+文件工作区采用浅灰背景、白色连续列表、蓝色主操作；Windows 使用现有 Segoe UI／微软雅黑字体。缩短标题与导航间距，将图标与名称合并成一列，48px 行高、无条纹、保留右键与独立更多按钮，避免固定窄列产生重复省略号。手机原有长按交互保留。
+
+新的 SynoLink 标识为自制 SVG 双链环，原稿 `public/synolink-icon.svg`，1024px 透明边缘 PNG 为 `public/synolink-icon-1024.png`。使用 `node scripts/render-app-icon.mjs` 从矢量重渲染，随后 `npm run tauri -- icon public/synolink-icon-1024.png` 生成平台尺寸；不是将旧 Tauri 默认图标放大。侧栏与应用资源同步替换。
+
+验证：桌面浅色／深色及 1440、1100、900、760px 布局通过；文件功能桌面／手机回归通过；类型检查、生产构建与 Windows NSIS 构建通过。安装后的 Windows 图标缓存与安卓启动器显示仍需设备验证。
+

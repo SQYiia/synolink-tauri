@@ -23,7 +23,6 @@ function openBatchRename(rows:any[]){
 import { directoryRevision, operationScope } from '../composables/useFileOperations'
 const fileTools = ref<InstanceType<typeof FileToolsDialog>>()
 function toolsOpen(mode:'share'|'manage'|'compress'|'extract',rows:any[]=[]){if(filesIdentity!==JSON.stringify([dsm.baseUrl,dsm.account])){toast('账号已切换，请等待文件列表刷新','warning');return}fileTools.value?.open(mode,rows.map(r=>({...r,isdir:isRowDir(r)})))}
-import { MoreFilled } from '@element-plus/icons-vue'
 import { useIsMobile } from '../composables/useIsMobile'
 import { useBackHandler } from '../composables/useInteractiveSwipeBack'
 import { confirm, prompt, toast } from '../utils/feedback'
@@ -795,22 +794,16 @@ watch(operationScope,()=>{if(operationScope.value===filesIdentity)return;filesId
         <el-button size="small" type="danger" @click="batchDelete">批量删除</el-button>
       </div>
 
-      <el-table ref="fileTable" @row-contextmenu="openContext" :row-class-name="({ row }: any) => row.path === route.query.selected ? 'search-match' : ''" :data="sortedItems" stripe @row-dblclick="openFolder" @selection-change="onSelectionChange" @sort-change="onSortChange" style="width: 100%">
+      <el-table ref="fileTable" @row-contextmenu="openContext" :row-class-name="({ row }: any) => row.path === route.query.selected ? 'search-match' : ''" :data="sortedItems" @row-dblclick="openFolder" @selection-change="onSelectionChange" @sort-change="onSortChange" style="width: 100%">
         <el-table-column type="selection" width="42" />
-        <el-table-column width="56">
-          <template #default="{ row }">
-            <el-icon v-if="isRowDir(row)" :size="28"><Folder /></el-icon>
-            <img
-              v-else-if="isThumbable(row) && thumbs[row.path]"
-              :src="thumbs[row.path]"
-              class="thumb"
-              @click="preview(row)"
-            />
-            <el-icon v-else-if="isThumbable(row)" :size="28" class="thumb-ph"><Picture /></el-icon>
-            <el-icon v-else :size="28"><Document /></el-icon>
-          </template>
+        <el-table-column prop="name" label="名称" sortable="custom" min-width="220" show-overflow-tooltip>
+          <template #default="{row}"><div class="file-name-cell">
+            <span v-if="isRowDir(row)" class="file-folder-symbol"><svg viewBox="0 0 32 28" aria-hidden="true"><path d="M2 6a3 3 0 0 1 3-3h7l3 4h12a3 3 0 0 1 3 3v13a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3z" fill="currentColor"/><path d="M2 11h28v12a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3z" fill="#79b4f4"/></svg></span>
+            <img v-else-if="isThumbable(row) && thumbs[row.path]" :src="thumbs[row.path]" class="thumb" @click="preview(row)"/>
+            <el-icon v-else :size="24" class="file-document-symbol"><Document /></el-icon>
+            <span class="file-name-label">{{row.name}}</span>
+          </div></template>
         </el-table-column>
-        <el-table-column prop="name" label="名称" sortable="custom" min-width="180" show-overflow-tooltip />
         <el-table-column prop="size" label="大小" width="110" sortable="custom">
           <template #default="{ row }">{{ isRowDir(row) ? '—' : formatBytes(row.additional?.size) }}</template>
         </el-table-column>
@@ -820,7 +813,7 @@ watch(operationScope,()=>{if(operationScope.value===filesIdentity)return;filesId
           </template>
         </el-table-column>
         <el-table-column width="52" align="center">
-          <template #default="{ row }"><button class="file-more" aria-label="更多文件操作" title="更多操作（也可右键）" @click.stop="openContext(row, null, $event)"><el-icon><MoreFilled /></el-icon></button></template>
+          <template #default="{ row }"><button class="file-more" aria-label="更多文件操作" title="更多操作（也可右键）" @click.stop="openContext(row, null, $event)"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="12" r="2" fill="currentColor"/><circle cx="19" cy="12" r="2" fill="currentColor"/></svg></button></template>
         </el-table-column>
       </el-table>
       <div class="file-context-hint"><span>{{items.length}} 个项目<span v-if="selection.length">，已选 {{selection.length}} 项</span></span><span>右键显示操作菜单 · 双击打开</span><button @click="loadCurrent" :disabled="loading">刷新</button></div>
